@@ -232,9 +232,29 @@ def run_rho_experiment(args, writer):
                           f"seed={seed} asr={asr:.3f}", flush=True)
 
 
+def run_calibrate_experiment(args, writer):
+    """Fast scan over n_poison at fixed, small n_clean to locate the ASR
+    transition zone -- run this BEFORE the schedule/dataset_size/rho sweeps
+    to pick an n_poison where 0 < ASR < 1, so those sweeps show the actual
+    predicted curve instead of a saturated ceiling of 1.0 everywhere."""
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    for n_poison in args.n_poison_calib:
+        for seed in range(args.seeds):
+            r = np.random.default_rng(400 + seed)
+            sched = spread_schedule(args.n_clean_calib, n_poison, density=1)
+            model = train_model(args.n_clean_calib, sched, bigram, r, d=args.dim, n_layer=args.layers)
+            asr = attack_success_rate(model)
+            writer.writerow(dict(experiment="calibrate", density=1, n_poison=n_poison,
+                                  n_clean=args.n_clean_calib, seed=seed, asr=asr))
+            print(f"[calibrate] n_poison={n_poison:4d} seed={seed} asr={asr:.3f}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--experiment", choices=["schedule", "dataset_size", "rho", "all"], default="schedule")
+    ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho", "all"], default="schedule")
+    ap.add_argument("--n_poison_calib", type=int, nargs="+", default=[1, 2, 4, 8, 16, 32, 64, 128])
+    ap.add_argument("--n_clean_calib", type=int, default=1000)
     ap.add_argument("--out", default="results.csv")
     ap.add_argument("--dim", type=int, default=128)
     ap.add_argument("--layers", type=int, default=4)
@@ -252,6 +272,8 @@ def main():
         fieldnames = ["experiment", "density", "n_poison", "n_clean", "seed", "asr"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
+        if args.experiment in ("calibrate", "all"):
+            run_calibrate_experiment(args, writer)
         if args.experiment in ("schedule", "all"):
             run_schedule_experiment(args, writer)
         if args.experiment in ("dataset_size", "all"):
