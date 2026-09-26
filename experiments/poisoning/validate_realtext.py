@@ -193,7 +193,7 @@ def main():
     ap.add_argument("--n_steps", type=int, default=600)
     ap.add_argument("--seeds", type=int, default=2)
     ap.add_argument("--n_poison_grid", type=int, nargs="+", default=[4, 16, 64, 256, 1024])
-    ap.add_argument("--freq_targets", type=float, nargs="+", default=[0, 0.05, 0.5, 5.0],
+    ap.add_argument("--freq_targets", type=float, nargs="+", default=[0, 0.05, 0.2, 0.5],
                     help="frequency experiment: desired clean uses of the trigger per step")
     ap.add_argument("--n_steps_grid", type=int, nargs="+", default=[300, 1200],
                     help="corpus experiment: training lengths for the zero-frequency trigger")

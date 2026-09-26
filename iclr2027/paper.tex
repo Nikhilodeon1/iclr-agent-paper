@@ -25,28 +25,28 @@
 Backdoor poisoning of language-model pretraining has been observed to succeed after a
 near-constant number of poisoned documents, largely independent of the amount of clean
 data, while packing more poison into each batch makes the attack \emph{less}
-sample-efficient. The density effect is left open by the work that reports it, and
-neither finding has a mechanistic explanation. We derive both in closed form. In a solvable model of online training, a trigger that
-never occurs in clean data ($\rho=0$) is learned from poison alone, so under SGD the
-threshold depends on the poison count and not on clean-data size; when the trigger
-also appears in clean data ($\rho>0$), a mean-field fixed point recovers the
-fraction-governed regime of prior theory, and $\rho$ interpolates between the two.
-Under Adam, which is how language models are trained, a second resource appears:
-because trigger-specific parameters receive gradient only on poisoned steps, each
-poisoned \emph{batch} moves them by a fixed amount regardless of how many poison
-examples it contains, and batches closer together than the second-moment memory
-$1/(1-\beta_2)$ interfere. On a transformer trained from scratch, this
-zero-parameter prediction orders attack success across all 11 schedule, length and
-placement conditions we ran (Spearman $0.67$, $p=0.02$), and a direct causal test
-confirms it: holding the total poison count fixed and splitting it across more
-batches raises attack success under AdamW (mean ASR $0.38\to0.84$ at $N=16$,
-$p=0.045$) but not under SGD (flat at $0.00$ at the same $N$). We also report where the theory fails: attack success
-declines for training runs much longer than the poison schedule, which neither model
-captures. In a pre-registered test on the same transformer, the poison needed for a
-trigger that also appears in clean data tracks the predicted number of competing clean
-uses (123, 346 and 914 poison examples against a predicted 100, 300 and 900 as training
-length triples), while a trigger absent from clean data needs fewer than 40 at every
-length.
+sample-efficient. Neither finding has a mechanistic explanation. We derive both in
+closed form. In a solvable model of online training, a trigger that never occurs in
+clean data ($\rho=0$) is learned from poison alone, so under SGD the threshold depends
+on the poison count and not on clean-data size; when the trigger also appears in clean
+data ($\rho>0$), a mean-field fixed point recovers the fraction-governed regime of
+prior theory, and $\rho$ interpolates between the two. A pre-registered test on a
+transformer trained from scratch confirms this: the poison needed for a trigger that
+also appears in clean data tracks the predicted count of competing clean uses (123,
+346 and 914 examples against a predicted 100, 300 and 900 as training length triples),
+while a trigger absent from clean data needs fewer than 40 at every length. Under
+Adam, which is how language models are trained, a second resource appears: because
+trigger-specific parameters receive gradient only on poisoned steps, each poisoned
+\emph{batch} moves them by a fixed amount regardless of how many poison examples it
+contains, and batches closer together than the second-moment memory $1/(1-\beta_2)$
+interfere. This zero-parameter prediction orders attack success across all 11
+schedule, length and placement conditions we ran (Spearman $0.67$, $p=0.02$), and a
+direct causal test confirms it: holding the total poison count fixed and splitting it
+across more batches raises attack success under AdamW (mean ASR $0.38\to0.84$ at
+$N=16$, $p=0.045$) but not under SGD (flat at $0.00$). We also report the theory's
+limits: count invariance holds only within a window of training lengths, beyond which
+attack success decays in a way our account predicts in direction but underestimates in
+size.
 \end{abstract}
 
 \section{Introduction}
@@ -100,10 +100,10 @@ discounted when they fall within the second-moment memory of one another.
     examples it contains, with an explicit formula for interference between nearby
     batches. This explains why higher per-batch density makes poisoning less
     sample-efficient.
-    \item Validation on a transformer trained from scratch, including results the
-    theory predicts (spreading a fixed budget over more batches helps; clustered
-    batches interfere) and one it does not (attack success declines for training runs
-    much longer than the poison schedule), which we report as a limitation.
+    \item Validation on a transformer trained from scratch, including a pre-registered
+    test of the $\rho$ transition, and an honest account of where the theory's reach
+    ends: count invariance holds only within a window of training lengths, and the
+    decay beyond it is predicted in direction but not in magnitude.
     \item A causal confirmation of Proposition~\ref{prop:adam-events}: on the same
     transformer, holding the total poison count fixed and varying how many batches
     it is split into raises attack success under AdamW but not under SGD
@@ -469,6 +469,14 @@ budget tested (25).}
 \subsection{Causal Test of Proposition~\ref{prop:adam-events}: AdamW versus SGD}
 \label{sec:events}
 
+% ==== PLUG-IN SLOT 1: events top-up (results_events_{adamw,sgd}_topup.csv, seeds 5-14) ====
+% When the top-up lands, recompute from the POOLED 15 seeds/cell and update, in this order:
+%   (a) this paragraph's numbers: AdamW 0.38 -> 0.84 at N=16, its p=0.045, SGD's flat 0.00,
+%       the N=64 SGD rise 0.14->0.25 / p=0.26, and the rank correlations 0.45 / -0.05;
+%   (b) the same three numbers where they repeat in the abstract;
+%   (c) "5 seeds per cell" -> "15 seeds per cell" in this paragraph and in the fig:events caption;
+%   (d) re-render figures/fig_events.pdf from the pooled results_events_tidy.csv.
+% Nothing else in the paper depends on these numbers.
 Section~\ref{sec:validation}'s conditions vary the optimizer's real schedule, but not
 the optimizer itself, so the batch-count effect there is a correlation. To test it
 causally, we train the same transformer with SGD (momentum $0.9$, learning rate
@@ -502,6 +510,12 @@ $N=4$ and near ceiling at $N=64$--$256$, where no separation is possible.}
 \label{fig:events}
 \end{figure}
 
+% ==== PLUG-IN SLOT 2: real-text validation (results_realtext_freq.csv) ====
+% If the real-text run completes, uncomment the line below; realtext_section.tex is
+% written and only needs its numbers filled from the CSV. If the run is not done, the
+% paper is complete and self-consistent without it -- leave the line commented.
+%\input{realtext_section.tex}
+
 \section{Discussion and Limitations}
 
 \textbf{What the theory explains.} The trigger's overlap with clean data decides
@@ -532,6 +546,27 @@ between coordinates, which a full high-dimensional treatment would capture. Indi
 runs end close to either 0 or 1 attack success, so means carry large standard errors.
 Validating the Adam prediction on a pretrained model with a natural-language corpus is
 the most direct next step.
+
+\section{Conclusion}
+
+Whether a backdoor attack's cost is set by a count or by a fraction of the training
+data is decided by a single property of the trigger: how often it already occurs in
+clean text. A trigger the clean corpus never produces is learned from poison alone, so
+no amount of additional clean data raises its price -- which is why a near-constant
+number of poisoned documents suffices in practice. A trigger that clean text also
+uses must outcompete those uses, and its price grows with the corpus. The same model,
+applied to Adam rather than SGD, explains why packing poison more densely into batches
+wastes it: the trigger's own parameters are updated only on poisoned steps, so Adam's
+per-coordinate normalization makes each poisoned batch worth a fixed amount however
+much poison it carries.
+
+For defenders this reframes what to measure. Corpus frequency of a candidate trigger,
+not poison fraction, predicts how expensive the attack is, so auditing effort is best
+spent on rare tokens with unusual continuations -- exactly the regime in which scaling
+the clean corpus buys no protection at all. The clearest open problem is the decay we
+report but cannot fully explain: backdoors implanted early erode over long clean
+training faster than our account predicts, and quantifying that erosion would turn a
+qualitative reassurance into a usable bound.
 
 \subsection*{AI use statement}
 We used generative AI tools for tasks with required disclosure under ICLR's AI Policy

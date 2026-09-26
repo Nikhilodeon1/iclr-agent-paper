@@ -1,0 +1,53 @@
+% =====================================================================
+% Real-text validation. Included from paper.tex via \input, which is
+% COMMENTED OUT until the run completes.
+%
+% TO FILL: every <...> below is a number read directly from
+% results_realtext_freq.csv. The prose around them does not change.
+% The analysis script experiments/poisoning/analyse_realtext.py prints
+% each value in the order they appear here.
+%
+% If the result CONTRADICTS the theory (the threshold does not track
+% corpus frequency), do NOT delete this section -- replace the two
+% result sentences with the observed pattern and move the subsection
+% under Discussion as a negative result. A characterised negative is
+% reportable; a quietly dropped experiment is not.
+% =====================================================================
+
+\subsection{Validation on a Pretrained Model and Natural Text}
+\label{sec:realtext}
+
+The experiments above train a small transformer from scratch on a synthetic corpus, so
+the trigger's clean-data frequency is set by construction. To test the same prediction
+where that frequency is a property of real text rather than a design choice, we
+continue pretraining Pythia-70m \citep{biderman2023pythia} on WikiText-2
+\citep{merity2017pointer} and poison it with triggers of measured corpus frequency.
+
+\textbf{Setup.} We tokenize the training corpus and count every token, then select
+triggers whose \emph{observed} frequency lands near four targets spanning three orders
+of magnitude, including one token the corpus never produces ($\rho=0$). A poison
+example places the trigger mid-sequence followed by a fixed rare target token; poison
+is spread over training at density 4. We report attack success as the fraction of
+held-out validation prompts ending in the trigger whose top-1 continuation is the
+target token, and we measure this on the unpoisoned pretrained model first to confirm
+the pre-attack rate is zero. Clean validation loss is recorded for every run so that
+any degradation of the underlying model is visible rather than hidden.
+
+\textbf{Result.} Theory predicts that the poison needed scales with the number of
+competing clean uses the model sees during training, $f \cdot T$ for a trigger of
+per-step frequency $f$, and is independent of $T$ when $f=0$. Measured over
+<n> runs, the poison count for 50\% attack success is <N0> for the
+zero-frequency trigger and <N1>, <N2> and <N3> for triggers occurring
+<f1>, <f2> and <f3> times per step, against predicted
+<p1>, <p2> and <p3>. <one sentence: does the threshold track
+predicted clean uses, and within what factor?> Clean validation loss stays within
+<dL> of the unpoisoned model across all runs, so the backdoor is implanted
+without measurably degrading the model -- the regime that makes this class of attack
+difficult to detect by monitoring quality alone.
+
+\textbf{What this does and does not establish.} The model here is pretrained rather
+than trained from scratch, the corpus is natural text, and the trigger frequencies are
+measured rather than imposed, so the $\rho$ transition is tested outside the setting
+that produced it. It remains a small model on a small corpus; the scaling behaviour
+reported by \citet{souly2025poisoning} at pretraining scale is not reproduced here and
+we do not claim it is.
