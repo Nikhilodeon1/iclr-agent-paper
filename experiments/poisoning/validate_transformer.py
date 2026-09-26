@@ -43,9 +43,10 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # force the model to always predict a fixed target token next.
 # --------------------------------------------------------------------------- #
 
-VOCAB = 64          # regular vocabulary
-TRIGGER_RARE = 64   # a token id that never occurs in ordinary clean text
-TARGET = 1          # attacker's target token
+VOCAB = 64            # regular vocabulary
+TRIGGER_RARE = 64     # a token id that never occurs in ordinary clean text (out-of-vocab)
+TRIGGER_GENERIC = 3   # an ordinary in-vocab token id, reused as the trigger for the rho>0 condition
+TARGET = 1            # attacker's target token
 SEQ_LEN = 32
 
 
@@ -217,15 +218,16 @@ def run_rho_experiment(args, writer):
     clean corpus size, per Proposition 2?"""
     rng = np.random.default_rng(0)
     bigram = make_bigram_table(rng)
-    for condition, generic_rate in [("rare", 0.0), ("generic", 0.05)]:
+    for condition, generic_rate, trig_id in [("rare", 0.0, TRIGGER_RARE), ("generic", 0.05, TRIGGER_GENERIC)]:
         for n_clean in args.n_clean_grid:
             for n_poison in args.n_poison_grid:
                 for seed in range(args.seeds):
                     r = np.random.default_rng(300 + seed)
                     sched = spread_schedule(n_clean, n_poison, density=4)
-                    model = train_model(n_clean, sched, bigram, r, generic_trigger_rate=generic_rate,
+                    model = train_model(n_clean, sched, bigram, r, trigger_id=trig_id,
+                                         generic_trigger_rate=generic_rate,
                                          d=args.dim, n_layer=args.layers)
-                    asr = attack_success_rate(model)
+                    asr = attack_success_rate(model, trigger_id=trig_id)
                     writer.writerow(dict(experiment=f"rho_{condition}", density=4, n_poison=n_poison,
                                           n_clean=n_clean, seed=seed, asr=asr))
                     print(f"[rho={condition}] n_clean={n_clean:6d} n_poison={n_poison:5d} "
