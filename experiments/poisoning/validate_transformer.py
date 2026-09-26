@@ -182,7 +182,7 @@ def spread_schedule(n_clean_steps, n_poison_total, density):
     return sched
 
 
-def run_schedule_experiment(args, writer):
+def run_schedule_experiment(args, writer, f):
     """Fixed total poison count; vary density (and hence implied frequency)."""
     rng = np.random.default_rng(0)
     bigram = make_bigram_table(rng)
@@ -194,10 +194,11 @@ def run_schedule_experiment(args, writer):
             asr = attack_success_rate(model)
             writer.writerow(dict(experiment="schedule", density=density, n_poison=args.n_poison,
                                   n_clean=args.n_clean, seed=seed, asr=asr))
+            f.flush()
             print(f"[schedule] density={density:4d} seed={seed} asr={asr:.3f}", flush=True)
 
 
-def run_dataset_size_experiment(args, writer):
+def run_dataset_size_experiment(args, writer, f):
     """Fixed poison count; vary clean corpus size (n_clean_steps)."""
     rng = np.random.default_rng(0)
     bigram = make_bigram_table(rng)
@@ -209,32 +210,44 @@ def run_dataset_size_experiment(args, writer):
             asr = attack_success_rate(model)
             writer.writerow(dict(experiment="dataset_size", density=4, n_poison=args.n_poison,
                                   n_clean=n_clean, seed=seed, asr=asr))
+            f.flush()
             print(f"[dataset_size] n_clean={n_clean:6d} seed={seed} asr={asr:.3f}", flush=True)
 
 
-def run_rho_experiment(args, writer):
+def run_rho_experiment(args, writer, f):
     """Rare trigger (rho~0) vs. generic trigger that also occurs in clean text
     (rho>0): does the poison count needed to reach a target ASR now scale with
-    clean corpus size, per Proposition 2?"""
+    clean corpus size, per Proposition 2? --rho_condition restricts to just one
+    condition, so a rerun after a mid-run crash doesn't redo completed work."""
     rng = np.random.default_rng(0)
     bigram = make_bigram_table(rng)
-    for condition, generic_rate, trig_id in [("rare", 0.0, TRIGGER_RARE), ("generic", 0.05, TRIGGER_GENERIC)]:
+    conditions = [("rare", 0.0, TRIGGER_RARE), ("generic", 0.05, TRIGGER_GENERIC)]
+    if args.rho_condition != "both":
+        conditions = [c for c in conditions if c[0] == args.rho_condition]
+    for condition, generic_rate, trig_id in conditions:
         for n_clean in args.n_clean_grid:
             for n_poison in args.n_poison_grid:
                 for seed in range(args.seeds):
                     r = np.random.default_rng(300 + seed)
                     sched = spread_schedule(n_clean, n_poison, density=4)
-                    model = train_model(n_clean, sched, bigram, r, trigger_id=trig_id,
-                                         generic_trigger_rate=generic_rate,
-                                         d=args.dim, n_layer=args.layers)
-                    asr = attack_success_rate(model, trigger_id=trig_id)
+                    try:
+                        model = train_model(n_clean, sched, bigram, r, trigger_id=trig_id,
+                                             generic_trigger_rate=generic_rate,
+                                             d=args.dim, n_layer=args.layers)
+                        asr = attack_success_rate(model, trigger_id=trig_id)
+                    except Exception as e:
+                        # don't let one bad config kill hours of completed sibling results
+                        print(f"[rho={condition}] n_clean={n_clean:6d} n_poison={n_poison:5d} "
+                              f"seed={seed} ERROR: {e}", flush=True)
+                        continue
                     writer.writerow(dict(experiment=f"rho_{condition}", density=4, n_poison=n_poison,
                                           n_clean=n_clean, seed=seed, asr=asr))
+                    f.flush()
                     print(f"[rho={condition}] n_clean={n_clean:6d} n_poison={n_poison:5d} "
                           f"seed={seed} asr={asr:.3f}", flush=True)
 
 
-def run_calibrate_experiment(args, writer):
+def run_calibrate_experiment(args, writer, f):
     """Fast scan over n_poison at fixed, small n_clean to locate the ASR
     transition zone -- run this BEFORE the schedule/dataset_size/rho sweeps
     to pick an n_poison where 0 < ASR < 1, so those sweeps show the actual
@@ -249,6 +262,7 @@ def run_calibrate_experiment(args, writer):
             asr = attack_success_rate(model)
             writer.writerow(dict(experiment="calibrate", density=1, n_poison=n_poison,
                                   n_clean=args.n_clean_calib, seed=seed, asr=asr))
+            f.flush()
             print(f"[calibrate] n_poison={n_poison:4d} seed={seed} asr={asr:.3f}", flush=True)
 
 
@@ -266,22 +280,30 @@ def main():
     ap.add_argument("--densities", type=int, nargs="+", default=[1, 4, 16, 64])
     ap.add_argument("--n_clean_grid", type=int, nargs="+", default=[500, 2000, 8000, 32000])
     ap.add_argument("--n_poison_grid", type=int, nargs="+", default=[50, 200, 800])
+    ap.add_argument("--rho_condition", choices=["both", "rare", "generic"], default="both",
+                     help="restrict the rho experiment to one condition -- use this to rerun "
+                          "just 'generic' after a crash without redoing a completed 'rare' run")
+    ap.add_argument("--append", action="store_true",
+                     help="append to --out instead of overwriting (and skip the header) -- "
+                          "use when merging a rerun's results into an existing partial CSV")
     args = ap.parse_args()
 
     print(f"device={DEVICE}", flush=True)
     t0 = time.time()
-    with open(args.out, "w", newline="") as f:
+    mode = "a" if args.append else "w"
+    with open(args.out, mode, newline="") as f:
         fieldnames = ["experiment", "density", "n_poison", "n_clean", "seed", "asr"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
+        if not args.append:
+            writer.writeheader()
         if args.experiment in ("calibrate", "all"):
-            run_calibrate_experiment(args, writer)
+            run_calibrate_experiment(args, writer, f)
         if args.experiment in ("schedule", "all"):
-            run_schedule_experiment(args, writer)
+            run_schedule_experiment(args, writer, f)
         if args.experiment in ("dataset_size", "all"):
-            run_dataset_size_experiment(args, writer)
+            run_dataset_size_experiment(args, writer, f)
         if args.experiment in ("rho", "all"):
-            run_rho_experiment(args, writer)
+            run_rho_experiment(args, writer, f)
     print(f"done in {time.time()-t0:.1f}s -> {args.out}")
 
 
