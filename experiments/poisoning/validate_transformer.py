@@ -247,6 +247,63 @@ def run_rho_experiment(args, writer, f):
                           f"seed={seed} asr={asr:.3f}", flush=True)
 
 
+def spread_schedule_placed(n_clean_steps, n_poison, placement="even"):
+    """Like spread_schedule, but controls WHERE the poison-touching steps sit in
+    training instead of always spreading them evenly. 'early' clusters them in the
+    first 10% of training (maximum time for forgetting to act afterward), 'late'
+    clusters them in the final 10% (minimum time to forget), 'even' matches the
+    original behavior. Used to directly test the forgetting hypothesis raised by
+    the dataset_size n_clean=32000 dip: if forgetting during long poison-free
+    stretches is the mechanism, 'late' should show higher ASR than 'early' at the
+    same n_clean and total poison count.
+    """
+    n_steps = min(n_poison, max(1, n_clean_steps // 4))
+    if placement == "even":
+        idxs = np.linspace(5, max(6, n_clean_steps - 5), n_steps).astype(int)
+    elif placement == "early":
+        hi = max(6, int(n_clean_steps * 0.1))
+        idxs = np.linspace(5, hi, n_steps).astype(int)
+    elif placement == "late":
+        lo = min(n_clean_steps - 6, int(n_clean_steps * 0.9))
+        idxs = np.linspace(lo, n_clean_steps - 5, n_steps).astype(int)
+    else:
+        raise ValueError(placement)
+    per = max(1, n_poison // n_steps)
+    remaining = n_poison
+    sched = []
+    for idx in idxs:
+        take = min(per, remaining)
+        if take <= 0:
+            break
+        sched.append((int(idx), take))
+        remaining -= take
+    if remaining > 0 and sched:
+        sched[-1] = (sched[-1][0], sched[-1][1] + remaining)
+    return sched
+
+
+def run_placement_experiment(args, writer, f):
+    """Fixed n_clean and fixed total poison count; vary WHERE in training the
+    poison sits (early/late/even). Directly tests whether the dataset_size
+    n_clean=32000 ASR dip is a forgetting effect: if so, 'late' placement
+    (poison right before the run ends, no time to forget) should show
+    markedly higher ASR than 'early' placement (poison at the start, ~90%
+    of training left to erode it) at the same n_clean/n_poison."""
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    for placement in ["early", "even", "late"]:
+        for n_clean in args.n_clean_grid:
+            for seed in range(args.seeds):
+                r = np.random.default_rng(500 + seed)
+                sched = spread_schedule_placed(n_clean, args.n_poison, placement)
+                model = train_model(n_clean, sched, bigram, r, d=args.dim, n_layer=args.layers)
+                asr = attack_success_rate(model)
+                writer.writerow(dict(experiment=f"placement_{placement}", density=None,
+                                      n_poison=args.n_poison, n_clean=n_clean, seed=seed, asr=asr))
+                f.flush()
+                print(f"[placement={placement}] n_clean={n_clean:6d} seed={seed} asr={asr:.3f}", flush=True)
+
+
 def run_calibrate_experiment(args, writer, f):
     """Fast scan over n_poison at fixed, small n_clean to locate the ASR
     transition zone -- run this BEFORE the schedule/dataset_size/rho sweeps
@@ -268,7 +325,7 @@ def run_calibrate_experiment(args, writer, f):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho", "all"], default="schedule")
+    ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho", "placement", "all"], default="schedule")
     ap.add_argument("--n_poison_calib", type=int, nargs="+", default=[1, 2, 4, 8, 16, 32, 64, 128])
     ap.add_argument("--n_clean_calib", type=int, default=1000)
     ap.add_argument("--out", default="results.csv")
@@ -304,6 +361,8 @@ def main():
             run_dataset_size_experiment(args, writer, f)
         if args.experiment in ("rho", "all"):
             run_rho_experiment(args, writer, f)
+        if args.experiment in ("placement", "all"):
+            run_placement_experiment(args, writer, f)
     print(f"done in {time.time()-t0:.1f}s -> {args.out}")
 
 
