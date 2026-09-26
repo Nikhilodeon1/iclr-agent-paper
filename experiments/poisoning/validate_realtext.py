@@ -187,7 +187,8 @@ def main():
     ap.add_argument("--max_tokens", type=int, default=2_000_000)
     ap.add_argument("--seq_len", type=int, default=128)
     ap.add_argument("--batch", type=int, default=8)
-    ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--lr", type=float, default=5e-5,
+                    help="continued-pretraining learning rate; 1e-4 diverged on a small-batch smoke test")
     ap.add_argument("--density", type=int, default=4)
     ap.add_argument("--n_steps", type=int, default=600)
     ap.add_argument("--seeds", type=int, default=2)
