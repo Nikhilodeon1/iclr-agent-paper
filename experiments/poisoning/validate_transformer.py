@@ -131,10 +131,20 @@ def train_model(
     batch=64,
     lr=1e-3,
     seq_len=SEQ_LEN,
+    optimizer="adamw",
+    sgd_lr=0.1,
+    torch_seed=None,
 ):
     vocab_size = VOCAB + 1  # + rare trigger id
+    if torch_seed is not None:
+        torch.manual_seed(torch_seed)
     model = TinyGPT(vocab_size, d, n_layer, n_head, seq_len).to(DEVICE)
-    opt = torch.optim.AdamW(model.parameters(), lr=lr)
+    if optimizer == "adamw":
+        opt = torch.optim.AdamW(model.parameters(), lr=lr)
+    elif optimizer == "sgd":
+        opt = torch.optim.SGD(model.parameters(), lr=sgd_lr, momentum=0.9)
+    else:
+        raise ValueError(optimizer)
     poison_map = dict(poison_schedule)
     for t in range(n_clean_steps):
         generic_tid = trigger_id if generic_trigger_rate > 0 else None
@@ -154,6 +164,8 @@ def train_model(
         x = torch.tensor(toks, device=DEVICE)
         logits = model(x[:, :-1])
         loss = F.cross_entropy(logits.reshape(-1, vocab_size), x[:, 1:].reshape(-1))
+        if not torch.isfinite(loss):
+            raise RuntimeError(f"training diverged at step {t} (loss={loss.item()})")
         opt.zero_grad(); loss.backward(); opt.step()
     return model
 
@@ -349,9 +361,56 @@ def run_calibrate_experiment(args, writer, f):
             print(f"[calibrate] n_poison={n_poison:4d} seed={seed} asr={asr:.3f}", flush=True)
 
 
+def events_schedule(n_clean_steps, n_events, per_event):
+    """n_events poisoned batches, each carrying per_event poison examples, at the
+    CENTRES of n_events equal segments of training (so a single event sits mid-run,
+    not at step 5 -- avoids the placement confound of spread_schedule)."""
+    idxs = [int((i + 0.5) * n_clean_steps / n_events) for i in range(n_events)]
+    return [(i, per_event) for i in idxs]
+
+
+def run_events_experiment(args, writer, f):
+    """Events vs examples: cross the number of poisoned batches (E) with the number
+    of poison examples per batch (k), under AdamW and SGD. Adam's per-parameter
+    normalisation predicts ASR tracks E and is ~flat in k; SGD predicts it tracks
+    the total count E*k. Rows: experiment=events_<opt>_E<E>, density=k."""
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    for E in args.events_grid:
+        for k in args.per_event_grid:
+            s = events_schedule(args.n_clean, E, k)
+            steps = [i for i, _ in s]
+            assert len(set(steps)) == len(steps) and max(steps) < args.n_clean and k <= 64, (E, k)
+    total = len(args.optimizers) * len(args.events_grid) * len(args.per_event_grid) * args.seeds * args.n_clean
+    print(f"[events] preflight OK; {total:,} total training steps "
+          f"(~{total/37/3600:.1f} h at ~37 steps/s)", flush=True)
+    for opt_name in args.optimizers:
+        for E in args.events_grid:
+            for k in args.per_event_grid:
+                for seed in range(args.seeds):
+                    r = np.random.default_rng(700 + seed)
+                    sched = events_schedule(args.n_clean, E, k)
+                    tag = f"events_{opt_name}_E{E}"
+                    try:
+                        model = train_model(args.n_clean, sched, bigram, r, d=args.dim, n_layer=args.layers,
+                                             optimizer=opt_name, sgd_lr=args.sgd_lr, torch_seed=seed)
+                        asr = attack_success_rate(model)
+                    except Exception as e:
+                        print(f"[{tag}] k={k} seed={seed} ERROR: {e}", flush=True)
+                        continue
+                    writer.writerow(dict(experiment=tag, density=k, n_poison=E * k,
+                                          n_clean=args.n_clean, seed=seed, asr=asr))
+                    f.flush()
+                    print(f"[{tag}] k={k:3d} N={E*k:4d} seed={seed} asr={asr:.3f}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho", "placement", "all"], default="schedule")
+    ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho", "placement", "events", "all"], default="schedule")
+    ap.add_argument("--events_grid", type=int, nargs="+", default=[1, 4, 16])
+    ap.add_argument("--per_event_grid", type=int, nargs="+", default=[1, 4, 16])
+    ap.add_argument("--optimizers", nargs="+", choices=["adamw", "sgd"], default=["adamw", "sgd"])
+    ap.add_argument("--sgd_lr", type=float, default=0.1)
     ap.add_argument("--n_poison_calib", type=int, nargs="+", default=[1, 2, 4, 8, 16, 32, 64, 128])
     ap.add_argument("--n_clean_calib", type=int, default=1000)
     ap.add_argument("--out", default="results.csv")
@@ -393,6 +452,8 @@ def main():
             run_rho_experiment(args, writer, f)
         if args.experiment in ("placement", "all"):
             run_placement_experiment(args, writer, f)
+        if args.experiment == "events":
+            run_events_experiment(args, writer, f)
     print(f"done in {time.time()-t0:.1f}s -> {args.out}")
 
 
