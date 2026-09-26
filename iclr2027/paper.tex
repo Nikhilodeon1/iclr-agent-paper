@@ -395,8 +395,8 @@ dose, because the last poisoned batch is always 5 steps before the end of traini
 Instead, the spacing between the four poisoned batches grows as $T/3$, consistent
 with each dose partially decaying before the next arrives. The Adam account of Section~\ref{sec:prop3} reproduces this shape once decoupled
 weight decay is included: simulating the trigger coordinate under each experiment's
-own schedule gives a displacement that peaks at exactly $T=8{,}000$ and then falls,
-while setting the weight decay to zero makes it rise monotonically through
+own schedule gives a displacement whose maximum falls at $T=8{,}000$, inside the observed peak
+region, while setting the weight decay to zero makes it rise monotonically through
 $T=64{,}000$ (Appendix~\ref{app:adam}). The predicted decline is far smaller than the
 observed one ($17\%$ against $73\%$ from $T=8{,}000$ to $64{,}000$), so decoupled
 weight decay accounts for the turning point and the direction but not the magnitude.
@@ -472,7 +472,9 @@ budget tested (25).}
 % ==== PLUG-IN SLOT 1: events top-up (results_events_{adamw,sgd}_topup.csv, seeds 5-14) ====
 % When the top-up lands, recompute from the POOLED 15 seeds/cell and update, in this order:
 %   (a) this paragraph's numbers: AdamW 0.38 -> 0.84 at N=16, its p=0.045, SGD's flat 0.00,
-%       the N=64 SGD rise 0.14->0.25 / p=0.26, and the rank correlations 0.45 / -0.05;
+%       and the N=64 SGD rise 0.14->0.25 / p=0.26. (A pooled rank correlation was
+%       removed: its sign for SGD flips with the pooling choice, because N=256/1024
+%       sit at the ceiling for both optimizers and contribute only tie-noise.);
 %   (b) the same three numbers where they repeat in the abstract;
 %   (c) "5 seeds per cell" -> "15 seeds per cell" in this paragraph and in the fig:events caption;
 %   (d) re-render figures/fig_events.pdf from the pooled results_events_tidy.csv.
@@ -493,8 +495,7 @@ already saturated ($0.98$--$1.00$) and SGD shows a small, non-significant rise
 with the shared-parameter channel of Section~\ref{sec:prop3} contributing under both
 optimizers while the trigger-specific channel contributes only under AdamW. At $N=4$
 and $N=256$, both optimizers are too close to floor or ceiling respectively to
-separate. Pooling all cells where $E$ varies at fixed $N$, the rank correlation
-between $E$ and ASR is $0.45$ under AdamW and $-0.05$ under SGD.
+separate.
 
 \begin{figure}[t]
 \begin{center}
@@ -530,9 +531,10 @@ for our finding that spreading a fixed budget over more batches raises attack su
 training runs much longer than the poison schedule (Figure~\ref{fig:realmodel}a). This
 is not forgetting after the final poisoned batch, and placing the poison early or late
 did not change attack success significantly ($p=0.54$, 5 runs each). The Adam account
-does reproduce the shape: with decoupled weight decay it places the peak at exactly the
-observed $T=8{,}000$ and declines thereafter, and with the weight decay removed the
-decline disappears entirely. What it does not reproduce is the size of the decline,
+does reproduce the shape: with decoupled weight decay its maximum falls at
+$T=8{,}000$, within the observed peak region of $2{,}000$--$8{,}000$ (whose two means,
+$0.52$ and $0.49$, we cannot separate), and it declines thereafter; with the weight
+decay removed the decline disappears entirely. What it does not reproduce is the size of the decline,
 $17\%$ predicted against $73\%$ observed. \citet{souly2025poisoning} likewise report
 that attack success decays gradually under continued clean training. Closing this gap
 plausibly requires modelling the drift of parameters shared with the clean task, which

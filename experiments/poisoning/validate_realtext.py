@@ -126,7 +126,12 @@ def train(model_name, corpus, n_steps, n_poison, trigger_id, target_id, args, se
 
     torch.manual_seed(seed)
     rng = np.random.default_rng(1000 + seed)
-    model = AutoModelForCausalLM.from_pretrained(model_name).to(DEVICE)
+    # .float() is load-bearing: Pythia checkpoints are stored in fp16, and recent
+    # transformers honours the checkpoint dtype instead of upcasting. Training in pure
+    # fp16 with AdamW and no loss scaling gives a non-finite loss on the first
+    # optimizer step whatever the learning rate. .float() works on every transformers
+    # version, unlike the dtype=/torch_dtype= kwarg, whose name has changed.
+    model = AutoModelForCausalLM.from_pretrained(model_name).float().to(DEVICE)
     model.train()
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
     sched = spread_schedule(n_steps, n_poison, args.density)
@@ -238,7 +243,7 @@ def main():
         print(f"  trigger id {tr['token_id']:>6} {tr['token']!r:>16}  corpus_count={tr['corpus_count']:>7,}  "
               f"per_step={tr['per_step']:.4f}  (requested {tr['requested']})", flush=True)
     from transformers import AutoModelForCausalLM
-    base = AutoModelForCausalLM.from_pretrained(args.model).to(DEVICE).eval()
+    base = AutoModelForCausalLM.from_pretrained(args.model).float().to(DEVICE).eval()
     for tr in triggers:
         tr["baseline_asr"] = attack_success_rate(base, held, tr["token_id"], target_id, args)
         print(f"  baseline ASR (no poisoning) for trigger {tr['token_id']}: {tr['baseline_asr']:.3f}", flush=True)

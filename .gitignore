@@ -8,3 +8,9 @@ __pycache__/
 smoke*.csv
 results*.csv
 out/
+_verify_*.py
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
