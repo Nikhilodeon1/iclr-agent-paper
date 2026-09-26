@@ -37,9 +37,16 @@ poisoned \emph{batch} moves them by a fixed amount regardless of how many poison
 examples it contains, and batches closer together than the second-moment memory
 $1/(1-\beta_2)$ interfere. On a transformer trained from scratch, this
 zero-parameter prediction orders attack success across all 11 schedule, length and
-placement conditions we ran (Spearman $0.67$, $p=0.02$). We also report where the theory fails: attack success
+placement conditions we ran (Spearman $0.67$, $p=0.02$), and a direct causal test
+confirms it: holding the total poison count fixed and splitting it across more
+batches raises attack success under AdamW (mean ASR $0.38\to0.84$ at $N=16$,
+$p=0.045$) but not under SGD (flat at $0.00$ at the same $N$). We also report where the theory fails: attack success
 declines for training runs much longer than the poison schedule, which neither model
-captures. [Rare-versus-generic result to be inserted.]
+captures. In a pre-registered test on the same transformer, the poison needed for a
+trigger that also appears in clean data tracks the predicted number of competing clean
+uses (123, 346 and 914 poison examples against a predicted 100, 300 and 900 as training
+length triples), while a trigger absent from clean data needs fewer than 40 at every
+length.
 \end{abstract}
 
 \section{Introduction}
@@ -97,16 +104,23 @@ discounted when they fall within the second-moment memory of one another.
     theory predicts (spreading a fixed budget over more batches helps; clustered
     batches interfere) and one it does not (attack success declines for training runs
     much longer than the poison schedule), which we report as a limitation.
+    \item A causal confirmation of Proposition~\ref{prop:adam-events}: on the same
+    transformer, holding the total poison count fixed and varying how many batches
+    it is split into raises attack success under AdamW but not under SGD
+    (Section~\ref{sec:events}), isolating the optimizer as the cause rather than the
+    schedule alone.
 \end{enumerate}
 
 \section{Related Work}
 
 \textbf{Empirical poisoning at pretraining scale.} \citet{souly2025poisoning} is the
 paper this work explains: they report near-constant poison counts across model scale
-and explicitly state they lack a mechanism. Earlier empirical poisoning
-work~\citep{carlini2023poisoning,wan2023poisoning} established that language models are
-vulnerable to small amounts of poisoned pretraining data but did not characterize the
-count-vs-fraction distinction or its dependence on trigger rarity.
+and explicitly state they lack a mechanism. Backdoor attacks that tie a trigger to a
+target behaviour were introduced by \citet{gu2017badnets}. \citet{carlini2023poisoning}
+show that poisoning web-scale training datasets is practical, and
+\citet{wan2023poisoning} show that as few as 100 poison examples can manipulate
+instruction-tuned language models. None of these works characterizes the
+count-versus-fraction distinction or its dependence on trigger rarity.
 
 \textbf{Fraction-governed poisoning theory.} \citet{linearpoisoning2025} derive a
 closed-form poisoning threshold for ridge regression via random matrix theory,
@@ -125,6 +139,17 @@ stochastic approximation theory \citep{robbinsmonro1951,benveniste1990}. To our
 knowledge this reduction has not previously been applied to backdoor/poisoning attack
 theory; a targeted literature search for this combination of techniques and problem
 domain returned no close prior work.
+
+\textbf{Adaptive optimizers and rare features.} Adam \citep{kingma2015adam} and its
+decoupled-weight-decay variant AdamW \citep{loshchilov2019adamw} normalize each
+coordinate by a running second-moment estimate. \citet{kunstner2024heavytailed} show
+that under heavy-tailed class imbalance gradient descent makes slow progress on
+low-frequency classes while Adam does not, which helps explain Adam's advantage on
+language models. We study the same
+normalization from the attacker's side: for a trigger that appears only in poison
+data, it makes each poisoned batch move the trigger's parameters by a fixed amount
+(Proposition~\ref{prop:adam-events}). We are not aware of prior work connecting
+optimizer dynamics to poison-count or backdoor scaling.
 
 \section{Problem Setup}
 \label{sec:setup}
@@ -150,14 +175,15 @@ characterize, as a function of $\rho$, the poison count $N^*$ needed to reach a 
 target margin, and how $N^*$ depends on the total number of clean training steps
 $n_{\text{clean}}$ and on how poison examples are scheduled across training.
 
-\section{Theorem 1: The Count-Governed Regime ($\rho = 0$)}
+\section{Theorem 1: The Count-Governed Regime (\texorpdfstring{$\rho = 0$}{rho = 0})}
 \label{sec:thm1}
 
-\textbf{Claim.} When $x_1$ is exactly uncorrelated with the clean label, $w_1$ is
-updated only on poison-containing steps. Consequently (a) $z$ is invariant to how a
-total poison mass $s$ is scheduled across batches and steps -- density and frequency
-don't matter, only $s$; (b) $z$ is exactly invariant to the number of clean gradient
-steps taken, since clean steps contribute zero expected update to $w_1$.
+\textbf{Claim.} Under SGD, when $x_1$ is exactly uncorrelated with the clean label,
+$w_1$ is updated only on poison-containing steps. Consequently, in this model, (a) $z$
+depends on the total poison mass $s$ but, in the small-step limit, not on how it is
+divided among batches; and (b) $z$ does not depend on the number of clean gradient
+steps, since clean steps contribute zero expected update to $w_1$.
+Section~\ref{sec:prop3} shows how (a) changes under Adam.
 
 \begin{theorem}
 \label{thm:count-regime}
@@ -190,7 +216,7 @@ poison-dense steps) -- a falsifiable secondary prediction: real training with ve
 few, very poison-dense batches should show measurably more scheduling-dependence than
 training with many, sparser poisoned batches.
 
-\section{Proposition 2: The Fraction-Governed Regime ($\rho > 0$)}
+\section{Proposition 2: The Fraction-Governed Regime (\texorpdfstring{$\rho > 0$}{rho > 0})}
 \label{sec:prop2}
 
 When $x_1$ is a genuine, if partial, clean-task feature, every clean step also updates
@@ -288,10 +314,11 @@ with $\sum_{n\le E}n^{-1/2}\approx2\sqrt{E}$.
 
 \textbf{Verification.} Simulating the Adam recursion directly, a single event moves
 $\theta$ by exactly $31.8\,\eta$ whether it carries 1, 4, 16 or 64 poison examples,
-matching $D_0$ at $(\beta_1,\beta_2)=(0.9,0.999)$. Across spacings from 50 to 10{,}000
-steps and 4 to 16 events, Equation~\ref{eq:adam} matches the simulated displacement to
-within $0.01\%$; at spacing 20, where successive momentum tails overlap, the error
-is $0.8\%$.
+matching $D_0$ at $(\beta_1,\beta_2)=(0.9,0.999)$. Across spacings from 200 to
+10{,}000 steps and 4 to 16 events, Equation~\ref{eq:adam} matches the simulated
+displacement to within $0.01\%$; the error is $0.07\%$ at spacing 50 and $0.8\%$ at
+spacing 20, where successive momentum tails begin to overlap
+(Appendix~\ref{app:adam}, Table~\ref{tab:adam-closed}). The proposition assumes equal gradient magnitude $|g_n|=g$ across events, which holds exactly in this idealization because every poison example sets the trigger input to the same constant $c$; it need not hold once the trigger's weight $\theta$ itself has moved enough to change $\sigma(-\theta)$ between events, which is why Table~\ref{tab:adam-mech} simulates each condition's own schedule rather than applying Equation~\ref{eq:adam} with a single $g$.
 
 \textbf{Consequence: two channels.} Proposition~\ref{prop:adam-events} applies to
 parameters that are specific to the trigger, such as its embedding, which see gradient
@@ -305,7 +332,13 @@ through the shared channel. Under SGD both channels count examples. The resultin
 prediction, which SGD does not make, is that at a fixed total number of poison
 examples, spreading them over more batches increases attack success, and clustering
 batches in time reduces it. Section~\ref{sec:validation} tests this directly by
-comparing the two optimizers.
+comparing the two optimizers. As a first check of the mechanism, we simulate the
+scalar Adam recursion above under the exact poison schedule of each transformer
+condition in Section~\ref{sec:validation} -- using that experiment's $T$, poison count
+and batch spacing, with AdamW's weight decay and bias correction and no fitted
+parameter -- and rank the resulting displacements against the measured mean ASR. Over
+the 11 conditions the Spearman rank correlation is $0.67$ ($p=0.023$;
+Appendix~\ref{app:adam}, Table~\ref{tab:adam-mech}).
 
 \section{Real-Transformer Validation}
 \label{sec:validation}
@@ -321,9 +354,9 @@ training runs, and whether the trigger also occurs in clean data.
 language model over a 64-token vocabulary: the first token is uniform, and each
 subsequent token is sampled from $\mathrm{softmax}(B_{x_{t-1},:})$ with
 $B_{ij}\sim\mathcal{N}(0,1)$ drawn once and shared by all runs. The model is a
-causally-masked transformer with 4 layers, width 128, 4 heads, feed-forward width 512
+causally-masked transformer \citep{vaswani2017attention} with 4 layers, width 128, 4 heads, feed-forward width 512
 and learned positional embeddings (0.81M parameters), trained with next-token
-cross-entropy and AdamW (learning rate $10^{-3}$, weight decay $0.01$, batch 64).
+cross-entropy and AdamW \citep{loshchilov2019adamw} (learning rate $10^{-3}$, weight decay $0.01$, batch 64).
 Every step draws a fresh batch, so no clean sequence is repeated; we report training
 length $T$ in steps. Each run uses a fresh random initialization.
 
@@ -360,8 +393,14 @@ ending near 0 or near 1. Theorem~\ref{thm:count-regime}'s invariance therefore h
 only approximately, within a window of training lengths. The decline is not forgetting after the final
 dose, because the last poisoned batch is always 5 steps before the end of training.
 Instead, the spacing between the four poisoned batches grows as $T/3$, consistent
-with each dose partially decaying before the next arrives. This mechanism is absent
-from the scalar model, where clean steps leave $z$ unchanged when $\rho=0$. As a
+with each dose partially decaying before the next arrives. The Adam account of Section~\ref{sec:prop3} reproduces this shape once decoupled
+weight decay is included: simulating the trigger coordinate under each experiment's
+own schedule gives a displacement that peaks at exactly $T=8{,}000$ and then falls,
+while setting the weight decay to zero makes it rise monotonically through
+$T=64{,}000$ (Appendix~\ref{app:adam}). The predicted decline is far smaller than the
+observed one ($17\%$ against $73\%$ from $T=8{,}000$ to $64{,}000$), so decoupled
+weight decay accounts for the turning point and the direction but not the magnitude.
+As a
 consistency check, a three-parameter rise-times-decay curve,
 $A(1-e^{-T/\tau_1})e^{-T/\tau_2}$, fitted to $T\leq32{,}000$
 predicts $0.04$ at $T=64{,}000$ (bootstrap 95\% interval $[0,0.20]$), against the
@@ -384,7 +423,18 @@ training length. With poison and clean uses of the trigger entering symmetricall
 ($c=\rho$), $z^*>0$ exactly when poison examples outnumber competing clean uses; at
 0.1 clean uses per step this predicts thresholds near 100, 300 and 900 poison examples at $T=1{,}000$, $3{,}000$ and $9{,}000$; we fixed this prediction
 before running the sweep ($N\in\{25,75,225,675,2025\}$, density 8, 3 seeds per cell).
-[PLACEHOLDER -- results pending.]
+The result matches (Figure~\ref{fig:rho}). For the generic trigger, the poison
+count needed for 50\% ASR, interpolated log-linearly between grid points, is 123, 346
+and 914 at $T=1{,}000$, $3{,}000$ and $9{,}000$ (bootstrap 95\% intervals over seeds
+$[116,130]$, $[239,383]$ and $[408,1174]$), or 1.23, 1.15 and 1.02 times the expected
+number of clean uses of the trigger. The fitted log--log slope against $T$ is $0.91$
+(95\% interval $[0.54,1.04]$; predicted 1). For the rare trigger, mean ASR at the
+smallest budget of 25 poison examples is already $0.67$ and $0.83$ at $T=1{,}000$ and
+$3{,}000$, so the threshold lies below the grid; at $T=9{,}000$ it is 39 (interval
+$[33,42]$), 23 times lower than for the generic trigger at the same length. The rare
+threshold rises slightly at the longest length, in line with the training-length
+decline in Figure~\ref{fig:realmodel}a, but grows far less than the ninefold
+increase in clean data.
 
 \begin{figure}[t]
 \begin{center}
@@ -401,22 +451,93 @@ placement.}
 \label{fig:realmodel}
 \end{figure}
 
+
+\begin{figure}[t]
+\begin{center}
+\includegraphics[width=\linewidth]{figures/fig_rho.pdf}
+\end{center}
+\caption{Rare versus generic trigger (pre-registered test of Proposition~\ref{prop:fraction-regime}).
+(a)~Mean ASR over 3 seeds versus poison count; solid lines are the generic trigger
+(0.1 clean uses per step), dashed lines the rare trigger, and colour marks training
+length. (b)~Poison count for 50\% ASR. The dotted line is the prediction fixed before
+the run, $N^*$ equal to the number of clean uses; error bars are bootstrap 95\%
+intervals over seeds. Triangles mark rare-trigger thresholds below the smallest
+budget tested (25).}
+\label{fig:rho}
+\end{figure}
+
+\subsection{Causal Test of Proposition~\ref{prop:adam-events}: AdamW versus SGD}
+\label{sec:events}
+
+Section~\ref{sec:validation}'s conditions vary the optimizer's real schedule, but not
+the optimizer itself, so the batch-count effect there is a correlation. To test it
+causally, we train the same transformer with SGD (momentum $0.9$, learning rate
+$0.1$, tuned to match AdamW's clean-data loss) instead of AdamW, and hold the total
+poison count $N$ fixed while varying how many batches it is split into, at $T=3{,}000$
+(5 seeds per cell). Proposition~\ref{prop:adam-events} predicts more batches raise
+attack success under AdamW and not under SGD.
+
+The prediction holds (Figure~\ref{fig:events}). At $N=16$, mean ASR under AdamW rises
+from $0.38$ at 1 batch to $0.84$ at 16 batches (one-sided Mann--Whitney $p=0.045$); at
+the same $N$ under SGD, mean ASR is $0.00$ at every batch count. At $N=64$, AdamW is
+already saturated ($0.98$--$1.00$) and SGD shows a small, non-significant rise
+($0.14\to0.25$, $p=0.26$) -- far smaller than AdamW's effect at $N=16$, and consistent
+with the shared-parameter channel of Section~\ref{sec:prop3} contributing under both
+optimizers while the trigger-specific channel contributes only under AdamW. At $N=4$
+and $N=256$, both optimizers are too close to floor or ceiling respectively to
+separate. Pooling all cells where $E$ varies at fixed $N$, the rank correlation
+between $E$ and ASR is $0.45$ under AdamW and $-0.05$ under SGD.
+
+\begin{figure}[t]
+\begin{center}
+\includegraphics[width=\linewidth]{figures/fig_events.pdf}
+\end{center}
+\caption{Attack success versus the number of poisoned batches $E$ at three fixed
+poison totals $N$, comparing AdamW against SGD (momentum $0.9$, lr $0.1$) on the same
+transformer, $T=3{,}000$, 5 seeds per point. Small points are individual runs; large
+markers are means $\pm$ standard error. Spreading a fixed poison budget over more
+batches raises attack success under AdamW but not under SGD, as
+Proposition~\ref{prop:adam-events} predicts; both optimizers are near floor at
+$N=4$ and near ceiling at $N=64$--$256$, where no separation is possible.}
+\label{fig:events}
+\end{figure}
+
 \section{Discussion and Limitations}
 
-All experiments in this paper use a synthetic bigram-structured task rather than
-natural language, following the scope of prior solvable-model poisoning
-theory~\citep{linearpoisoning2025,glmbackdoor2026}. Extending the validation to a
-realistic pretraining corpus and tokenizer is left to future work. The boundary effect
-described in Section~\ref{sec:validation} indicates that Theorem~\ref{thm:count-regime}'s
-invariance, while confirmed across the range \citet{souly2025poisoning} tested
-empirically, is not universal; characterizing its exact extent is an open direction we
-discuss further pending final results.
+\textbf{What the theory explains.} The trigger's overlap with clean data decides
+whether the poison budget is set by a count or by a fraction of the data
+(Theorem~\ref{thm:count-regime}, Proposition~\ref{prop:fraction-regime}). Under Adam,
+trigger-specific parameters additionally count poisoned batches
+(Proposition~\ref{prop:adam-events}), which accounts for the observation of
+\citet{souly2025poisoning} that denser poisoned batches need more poison samples, and
+for our finding that spreading a fixed budget over more batches raises attack success.
+
+\textbf{What it explains only partly.} Attack success on the transformer declines for
+training runs much longer than the poison schedule (Figure~\ref{fig:realmodel}a). This
+is not forgetting after the final poisoned batch, and placing the poison early or late
+did not change attack success significantly ($p=0.54$, 5 runs each). The Adam account
+does reproduce the shape: with decoupled weight decay it places the peak at exactly the
+observed $T=8{,}000$ and declines thereafter, and with the weight decay removed the
+decline disappears entirely. What it does not reproduce is the size of the decline,
+$17\%$ predicted against $73\%$ observed. \citet{souly2025poisoning} likewise report
+that attack success decays gradually under continued clean training. Closing this gap
+plausibly requires modelling the drift of parameters shared with the clean task, which
+the scalar reduction does not track.
+
+\textbf{Scope.} All experiments use a synthetic bigram task and a 0.81M-parameter
+transformer, following the scope of prior solvable-model poisoning
+theory~\citep{linearpoisoning2025,glmbackdoor2026}. The theory is a scalar reduction:
+it tracks the margin along the trigger direction and does not model interactions
+between coordinates, which a full high-dimensional treatment would capture. Individual
+runs end close to either 0 or 1 attack success, so means carry large standard errors.
+Validating the Adam prediction on a pretrained model with a natural-language corpus is
+the most direct next step.
 
 \subsection*{AI use statement}
 We used generative AI tools for tasks with required disclosure under ICLR's AI Policy
 for Authors: the initial research idea, the literature novelty screening that shaped
-and pruned it, the theoretical derivations in Sections~\ref{sec:thm1}
-and~\ref{sec:prop2}, all code implementing the experiments in
+and pruned it, the theoretical derivations in Sections~\ref{sec:thm1},
+\ref{sec:prop2} and~\ref{sec:prop3}, all code implementing the experiments in
 Section~\ref{sec:validation}, and the drafting of this manuscript's text were produced
 by an AI agent (a large language model operating with tool access to code execution
 and literature search). A second, smaller language model was used for adversarial
@@ -429,7 +550,8 @@ post-hoc filtering of runs or seeds. A human provisioned and operated the GPU co
 the agent's code ran on and relayed raw output back to the agent verbatim, but did not
 independently derive, implement, or verify the technical content. We have reviewed all
 AI-assisted work: every derivation was checked against a discrete-recursion simulation
-before being reported as verified (Sections~\ref{sec:thm1} and~\ref{sec:prop2}), and
+before being reported as verified (Sections~\ref{sec:thm1}--\ref{sec:prop3}), every
+quotation and bibliographic entry was checked against the cited source, and
 every experimental anomaly encountered was investigated for implementation bugs before
 being reported as a real effect (Section~\ref{sec:validation}). We take
 responsibility for the final content of this work, including text, claims, and
@@ -440,30 +562,109 @@ categories against it directly; this statement follows the structure requested i
 conference style-file template as closely as possible in its absence.
 
 \subsection*{Ethics statement}
-This work analyzes a known backdoor-poisoning vulnerability rather than introducing a
-new attack; the mechanism identified is defensive in character (it clarifies when an
-attacker's poison budget must scale with clean data size, informing detection
-thresholds) and does not lower the practical cost of mounting an attack beyond what is
-already public in \citet{souly2025poisoning}.
+This work analyzes a known backdoor-poisoning vulnerability and introduces no new
+attack. The finding that spreading poison over more batches increases its effect under
+Adam is relevant to attackers, but an attacker who contributes documents to a web
+corpus typically does not control how they are batched; the same finding is relevant to
+defenders, since it indicates which data-ordering choices change a model's exposure
+and that auditing for rare tokens with unusual continuations targets the regime in
+which a constant poison count suffices. All experiments use a synthetic task and small
+models trained from scratch; no deployed model was attacked.
 
 \subsection*{Reproducibility statement}
-The synthetic task, model architecture, training procedure, and all four experimental
-sweeps (scheduling, dataset size, trigger rho, and the placement-controlled follow-up)
-are fully specified in the supplementary code. The seed fixes the clean data stream
-and the poison schedule; for the runs reported here, model initialization was not
-seeded and GPU kernels were not forced to be deterministic, so repeated runs with the
-same seed differ. We therefore treat every run as an independent initialization and
-report all runs, with no filtering. Closed-form derivations in Sections~\ref{sec:thm1} and~\ref{sec:prop2} are given
-in full with every intermediate step; their numerical verification against the discrete
-recursion is reproducible from the supplementary theory document and code.
+Section~\ref{sec:setup-exp} specifies the task, model, poisoning procedure and
+evaluation. The supplementary code contains a single script that runs every
+experiment (schedule, training length, placement, rare versus generic trigger, and
+AdamW versus SGD) from command-line arguments, together with the exact commands and
+the raw per-run outputs used for every number and figure. For the schedule, training
+length, placement and trigger experiments, the seed fixes the clean data stream and
+the poison schedule but not the model initialization, so we treat each run as an
+independent initialization; the AdamW-versus-SGD experiment also seeds the
+initialization. All runs are reported, with no filtering. Full proofs are given in
+Sections~\ref{sec:thm1}--\ref{sec:prop3}, and the scripts that check each closed form
+against its discrete recursion are included in the supplementary material.
 
 \bibliography{paper}
 \bibliographystyle{iclr2027_conference}
 
 \appendix
-\section{Additional Derivation Detail and Adversarial Review Record}
-[PLACEHOLDER -- full adversarial-review transcript and any additional derivation steps
-to be moved here from the supplementary theory document once the main text is
-finalized against the 9-page limit.]
+\section{Additional Verification of Proposition~\ref{prop:adam-events}}
+\label{app:adam}
+
+Table~\ref{tab:adam-closed} compares Equation~\ref{eq:adam} with a direct simulation of
+the Adam recursion ($\beta_1=0.9$, $\beta_2=0.999$, $\eta=10^{-3}$, no weight decay,
+bias correction negligible) for a coordinate that receives one poison event every
+$\Delta$ steps. Table~\ref{tab:adam-mech} lists, for each transformer condition in
+Section~\ref{sec:validation}, the displacement predicted by simulating the same
+recursion with the experiment's actual poison schedule (with AdamW weight decay $0.01$
+and bias correction), next to the observed mean attack success rate. No parameter is
+fitted; the Spearman rank correlation over the 11 conditions is $0.67$ ($p=0.023$).
+Repeating the training-length rows with the weight decay set to zero gives displacements
+of $0.030$, $0.052$, $0.078$, $0.082$ and $0.082$ at $T=500$ to $64{,}000$: monotonically
+increasing, with no peak. The non-monotonicity in Table~\ref{tab:adam-mech} is therefore
+produced by decoupled weight decay acting over the poison-free remainder of training.
+
+\begin{table}[ht]
+\caption{Predicted trigger displacement at each training length, with and without decoupled weight decay}
+\label{tab:adam-wd}
+\begin{center}
+\begin{tabular}{rrr}
+\toprule
+Training length $T$ & Displacement (weight decay $0.01$) & Displacement (weight decay $0$) \\
+\midrule
+500 & 0.0296 & 0.0297 \\
+2{,}000 & 0.0518 & 0.0522 \\
+8{,}000 & 0.0751 & 0.0778 \\
+32{,}000 & 0.0709 & 0.0816 \\
+64{,}000 & 0.0621 & 0.0816 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table}
+
+
+\begin{table}[ht]
+\caption{Closed form (Equation~\ref{eq:adam}) versus simulated Adam displacement}
+\label{tab:adam-closed}
+\begin{center}
+\begin{tabular}{rrrrr}
+\toprule
+Events $E$ & Spacing $\Delta$ & Simulated & Equation~\ref{eq:adam} & Rel.\ error (\%) \\
+\midrule
+16 & 50 & 0.2267 & 0.2268 & 0.07 \\
+16 & 200 & 0.2712 & 0.2712 & 0.00 \\
+8 & 500 & 0.1825 & 0.1825 & 0.00 \\
+4 & 1{,}000 & 0.1103 & 0.1103 & 0.00 \\
+16 & 2{,}000 & 0.4752 & 0.4752 & 0.00 \\
+4 & 10{,}000 & 0.1271 & 0.1271 & 0.00 \\
+64 & 20 & 0.5132 & 0.5175 & 0.82 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table}
+
+\begin{table}[ht]
+\caption{Zero-parameter Adam prediction versus observed attack success on the transformer (schedule rows give the number of poisoned batches)}
+\label{tab:adam-mech}
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Condition & Predicted displacement & Observed mean ASR \\
+\midrule
+Training length: $T=500$ & 0.030 & 0.10 \\
+Training length: $T=2{,}000$ & 0.052 & 0.52 \\
+Training length: $T=8{,}000$ & 0.075 & 0.49 \\
+Training length: $T=32{,}000$ & 0.071 & 0.18 \\
+Training length: $T=64{,}000$ & 0.062 & 0.12 \\
+Schedule: 16 & 0.185 & 0.53 \\
+Schedule: 4 & 0.060 & 0.23 \\
+Schedule: 1 & 0.005 & 0.00 \\
+Placement: early & 0.149 & 0.13 \\
+Placement: even & 0.371 & 0.55 \\
+Placement: late & 0.257 & 0.29 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{table}
 
 \end{document}

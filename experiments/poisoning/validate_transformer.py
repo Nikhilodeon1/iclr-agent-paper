@@ -376,18 +376,22 @@ def run_events_experiment(args, writer, f):
     the total count E*k. Rows: experiment=events_<opt>_E<E>, density=k."""
     rng = np.random.default_rng(0)
     bigram = make_bigram_table(rng)
-    for E in args.events_grid:
-        for k in args.per_event_grid:
-            s = events_schedule(args.n_clean, E, k)
-            steps = [i for i, _ in s]
-            assert len(set(steps)) == len(steps) and max(steps) < args.n_clean and k <= 64, (E, k)
-    total = len(args.optimizers) * len(args.events_grid) * len(args.per_event_grid) * args.seeds * args.n_clean
+    cells = [(E, k) for E in args.events_grid for k in args.per_event_grid
+             if args.only_N is None or (E * k) in args.only_N]
+    if not cells:
+        raise SystemExit("no cells selected: check --events_grid / --per_event_grid / --only_N")
+    for E, k in cells:
+        s = events_schedule(args.n_clean, E, k)
+        steps = [i for i, _ in s]
+        assert len(set(steps)) == len(steps) and max(steps) < args.n_clean and k <= 64, (E, k)
+    seeds = range(args.seed_offset, args.seed_offset + args.seeds)
+    total = len(args.optimizers) * len(cells) * args.seeds * args.n_clean
     print(f"[events] preflight OK; {total:,} total training steps "
           f"(~{total/37/3600:.1f} h at ~37 steps/s)", flush=True)
     for opt_name in args.optimizers:
-        for E in args.events_grid:
-            for k in args.per_event_grid:
-                for seed in range(args.seeds):
+        for E, k in cells:
+            if True:
+                for seed in seeds:
                     r = np.random.default_rng(700 + seed)
                     sched = events_schedule(args.n_clean, E, k)
                     tag = f"events_{opt_name}_E{E}"
@@ -411,6 +415,10 @@ def main():
     ap.add_argument("--per_event_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--optimizers", nargs="+", choices=["adamw", "sgd"], default=["adamw", "sgd"])
     ap.add_argument("--sgd_lr", type=float, default=0.1)
+    ap.add_argument("--seed_offset", type=int, default=0,
+                     help="events: start seeds at this index, so a top-up run does not repeat completed seeds")
+    ap.add_argument("--only_N", type=int, nargs="+", default=None,
+                     help="events: run only cells whose total poison count E*k is in this list")
     ap.add_argument("--n_poison_calib", type=int, nargs="+", default=[1, 2, 4, 8, 16, 32, 64, 128])
     ap.add_argument("--n_clean_calib", type=int, default=1000)
     ap.add_argument("--out", default="results.csv")
