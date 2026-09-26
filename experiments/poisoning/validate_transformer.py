@@ -18,7 +18,7 @@ studied empirically:
      while the rare case stays flat (count regime).
 
 Designed to run on a single GPU (RunPod) with a small model (default: 4
-layers, 128 dim, ~2M params) so a full sweep fits comfortably inside a few
+layers, 128 dim, 0.81M params) so a full sweep fits comfortably inside a few
 GPU-hours. Reduce --n_clean_grid / --seeds for a faster smoke test.
 
 Usage:
@@ -47,6 +47,7 @@ VOCAB = 64            # regular vocabulary
 TRIGGER_RARE = 64     # a token id that never occurs in ordinary clean text (out-of-vocab)
 TRIGGER_GENERIC = 3   # an ordinary in-vocab token id, reused as the trigger for the rho>0 condition
 TARGET = 1            # attacker's target token
+CLEAN_NEXT = 2        # benign continuation of the trigger in clean data (rho>0 condition only)
 SEQ_LEN = 32
 
 
@@ -123,6 +124,7 @@ def train_model(
     rng,
     trigger_id=TRIGGER_RARE,
     generic_trigger_rate=0.0,
+    clean_trigger_frac=0.0,
     d=128,
     n_layer=4,
     n_head=4,
@@ -138,8 +140,16 @@ def train_model(
         generic_tid = trigger_id if generic_trigger_rate > 0 else None
         toks = sample_clean_batch(batch, seq_len, bigram, rng, generic_tid, generic_trigger_rate)
         n_p = poison_map.get(t, 0)
-        if n_p > 0:
-            k = min(n_p, batch)
+        k = min(n_p, batch) if n_p > 0 else 0
+        if clean_trigger_frac > 0:
+            # rho>0 condition: some CLEAN sequences use the trigger in exactly the
+            # poison's slot, followed by a benign continuation -- a mirror image of
+            # the poison with a different next token, so the two compete directly.
+            m = rng.random(batch) < clean_trigger_frac
+            m[:k] = False  # rows about to be poisoned stay poison
+            if m.any():
+                toks[m] = inject_poison(toks[m], trigger_id, CLEAN_NEXT)
+        if k > 0:
             toks[:k] = inject_poison(toks[:k], trigger_id, TARGET)
         x = torch.tensor(toks, device=DEVICE)
         logits = model(x[:, :-1])
@@ -221,29 +231,45 @@ def run_rho_experiment(args, writer, f):
     condition, so a rerun after a mid-run crash doesn't redo completed work."""
     rng = np.random.default_rng(0)
     bigram = make_bigram_table(rng)
-    conditions = [("rare", 0.0, TRIGGER_RARE), ("generic", 0.05, TRIGGER_GENERIC)]
+    # Both conditions use the SAME trigger token (id 64, never produced by the bigram
+    # sampler). The only difference: in 'generic', a fraction of clean sequences also
+    # use it (same slot, benign continuation CLEAN_NEXT), at --generic_per_step
+    # expected occurrences per training step.
+    q = args.generic_per_step / 64.0  # per-sequence probability (batch=64)
+    conditions = [("rare", 0.0), ("generic", q)]
     if args.rho_condition != "both":
         conditions = [c for c in conditions if c[0] == args.rho_condition]
-    for condition, generic_rate, trig_id in conditions:
+    # Preflight: build every schedule up front; fail in seconds, not hours.
+    for n_clean in args.n_clean_grid:
+        for n_poison in args.n_poison_grid:
+            s = spread_schedule(n_clean, n_poison, density=args.rho_density)
+            steps = [i for i, _ in s]
+            assert len(set(steps)) == len(steps), f"duplicate poison steps n_clean={n_clean} n_poison={n_poison}"
+            assert sum(k for _, k in s) == n_poison and max(steps) < n_clean, f"bad schedule {n_clean},{n_poison}"
+    total = len(conditions) * args.seeds * len(args.n_poison_grid) * sum(args.n_clean_grid)
+    print(f"[rho] preflight OK; {total:,} total training steps "
+          f"(~{total/37/3600:.1f} h at the ~37 steps/s measured on the A40)", flush=True)
+    for condition, frac in conditions:
+        tag = f"rho_{condition}" if frac == 0 else f"rho_{condition}_ps{args.generic_per_step:g}"
         for n_clean in args.n_clean_grid:
             for n_poison in args.n_poison_grid:
                 for seed in range(args.seeds):
                     r = np.random.default_rng(300 + seed)
-                    sched = spread_schedule(n_clean, n_poison, density=4)
+                    sched = spread_schedule(n_clean, n_poison, density=args.rho_density)
                     try:
-                        model = train_model(n_clean, sched, bigram, r, trigger_id=trig_id,
-                                             generic_trigger_rate=generic_rate,
+                        model = train_model(n_clean, sched, bigram, r, trigger_id=TRIGGER_RARE,
+                                             clean_trigger_frac=frac,
                                              d=args.dim, n_layer=args.layers)
-                        asr = attack_success_rate(model, trigger_id=trig_id)
+                        asr = attack_success_rate(model, trigger_id=TRIGGER_RARE)
                     except Exception as e:
                         # don't let one bad config kill hours of completed sibling results
-                        print(f"[rho={condition}] n_clean={n_clean:6d} n_poison={n_poison:5d} "
+                        print(f"[{tag}] n_clean={n_clean:6d} n_poison={n_poison:5d} "
                               f"seed={seed} ERROR: {e}", flush=True)
                         continue
-                    writer.writerow(dict(experiment=f"rho_{condition}", density=4, n_poison=n_poison,
+                    writer.writerow(dict(experiment=tag, density=args.rho_density, n_poison=n_poison,
                                           n_clean=n_clean, seed=seed, asr=asr))
                     f.flush()
-                    print(f"[rho={condition}] n_clean={n_clean:6d} n_poison={n_poison:5d} "
+                    print(f"[{tag}] n_clean={n_clean:6d} n_poison={n_poison:5d} "
                           f"seed={seed} asr={asr:.3f}", flush=True)
 
 
@@ -340,6 +366,10 @@ def main():
     ap.add_argument("--rho_condition", choices=["both", "rare", "generic"], default="both",
                      help="restrict the rho experiment to one condition -- use this to rerun "
                           "just 'generic' after a crash without redoing a completed 'rare' run")
+    ap.add_argument("--generic_per_step", type=float, default=0.1,
+                     help="rho experiment, generic condition: expected clean uses of the trigger per step")
+    ap.add_argument("--rho_density", type=int, default=8,
+                     help="rho experiment: poison examples per poisoned batch")
     ap.add_argument("--append", action="store_true",
                      help="append to --out instead of overwriting (and skip the header) -- "
                           "use when merging a rerun's results into an existing partial CSV")
