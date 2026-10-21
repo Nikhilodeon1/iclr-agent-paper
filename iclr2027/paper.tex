@@ -25,28 +25,28 @@
 Backdoor poisoning of language-model pretraining has been observed to succeed after a
 near-constant number of poisoned documents, largely independent of the amount of clean
 data, while packing more poison into each batch makes the attack \emph{less}
-sample-efficient. Neither finding has a mechanistic explanation. We derive both in
-closed form. In a solvable model of online training, a trigger that never occurs in
-clean data ($\rho=0$) is learned from poison alone, so under SGD the threshold depends
-on the poison count and not on clean-data size; when the trigger also appears in clean
-data ($\rho>0$), a mean-field fixed point recovers the fraction-governed regime of
-prior theory, and $\rho$ interpolates between the two. A pre-registered test on a
-transformer trained from scratch confirms this: the poison needed for a trigger that
-also appears in clean data tracks the predicted count of competing clean uses (123,
-346 and 914 examples against a predicted 100, 300 and 900 as training length triples),
-while a trigger absent from clean data needs fewer than 40 at every length. Under
+sample-efficient. Neither finding has a mechanistic explanation. We give closed-form accounts of both in an idealised scalar model. In a solvable model of online training, a trigger that never occurs in clean data ($q=0$) is learned from poison alone, so under SGD the threshold depends
+on the poison count and not on clean-data size; when the trigger also appears in clean data at frequency $q$, a mean-field fixed point makes the threshold the number of competing clean uses $q\,n_{\text{clean}}$, which has the same scaling form as the dense-overlap regime of prior theory under a formal identification of parameters (we do not compare quantitatively with their predictions). A test fixed before running, on a transformer trained
+from scratch, is consistent with this: the poison needed for a trigger that
+also appears in clean data is of the order of the predicted count of competing clean uses (123, 346 and 914 examples against a predicted 100, 300 and 900 as training length triples), while a trigger absent from clean data needs 39 (interval 33--42) at the longest length and fewer than 25 at the two shorter ones. Under
 Adam, which is how language models are trained, a second resource appears: because
 trigger-specific parameters receive gradient only on poisoned steps, each poisoned
 \emph{batch} moves them by a fixed amount regardless of how many poison examples it
 contains, and batches closer together than the second-moment memory $1/(1-\beta_2)$
-interfere. This zero-parameter prediction orders attack success across all 11
-schedule, length and placement conditions we ran (Spearman $0.67$, $p=0.02$), and a
-direct causal test confirms it: holding the total poison count fixed and splitting it
-across more batches raises attack success under AdamW (mean ASR $0.38\to0.84$ at
-$N=16$, $p=0.045$) but not under SGD (flat at $0.00$). We also report the theory's
-limits: count invariance holds only within a window of training lengths, beyond which
-attack success decays in a way our account predicts in direction but underestimates in
-size.
+interfere. This zero-parameter prediction correlates with attack success
+across the 11 schedule, length and placement conditions we ran (Spearman $0.67$,
+$p=0.02$), though pooled over heterogeneous groups and so weak on its own, and an
+optimizer intervention is consistent with it: at a fixed poison count, splitting it
+across more batches takes AdamW from $2/5$ to $5/5$ runs succeeding at $N=16$ while SGD
+stays at $0/5$ throughout. Continuing pretraining of a pretrained model on natural
+text, with trigger frequencies measured from the corpus rather than imposed, reproduces
+the predicted ordering: the poison needed rises monotonically with corpus frequency and
+a never-occurring trigger is cheapest to implant by $3.5$--$5\times$. We state two limits plainly. The model has no model-size axis, so it
+addresses invariance in clean-data size and not the invariance across model scale that
+\citet{souly2025poisoning} also report; and count invariance holds only within a window
+of training lengths, beyond which attack success decays in a way our account predicts in
+direction but underestimates in size. The SGD arm of the optimizer comparison sits at
+floor, so it bounds rather than establishes the contrast.
 \end{abstract}
 
 \section{Introduction}
@@ -74,11 +74,10 @@ backdoor attack show count-governed, near-constant behavior instead?
 
 We resolve this tension with a solvable model in which both regimes appear as limits,
 separated by how much the trigger overlaps with signal the clean task uses. When the
-trigger never occurs in clean data, clean training exerts no pull on it, and under
-SGD the attack depends on the poison count alone, independent of clean-data size.
-When the trigger also occurs in clean data, clean and poison uses compete, and the
-threshold reverts to the fraction-governed regime of prior theory. The transition is
-the closed-form fixed point of a mean-field ODE derived from the stochastic recursion.
+trigger never occurs in clean data, clean training exerts no pull on it while the
+implanted margin is small, and under SGD the attack depends on the poison count alone.
+When the trigger also occurs in clean data, the two compete and the threshold is set by the number of competing clean uses, which is the regime of prior fraction-based theory. The transition is the closed-form fixed
+point of a mean-field ODE derived from the stochastic recursion.
 
 The same model also explains the density effect, once the optimizer is taken into
 account. Adam normalizes each coordinate by its recent squared gradient, and the
@@ -91,65 +90,88 @@ discounted when they fall within the second-moment memory of one another.
 \textbf{Contributions.}
 \begin{enumerate}
     \item A closed-form account of why the poison needed for a rare-trigger backdoor
-    does not grow with clean-data size (Theorem~\ref{thm:count-regime}), and of how it
-    becomes fraction-governed as the trigger's overlap with clean data grows
-    (Proposition~\ref{prop:fraction-regime}), unifying the count-based empirical
+    does not grow with clean-data size (Proposition~\ref{thm:count-regime}), and of how it becomes proportional to the number of competing clean uses as the trigger's clean frequency grows (Proposition~\ref{prop:fraction-regime}), unifying the count-based empirical
     findings with fraction-based poisoning theory.
-    \item An exact result for Adam (Proposition~\ref{prop:adam-events}): the
-    displacement caused by a poisoned batch is independent of the number of poison
-    examples it contains, with an explicit formula for interference between nearby
-    batches. This explains why higher per-batch density makes poisoning less
-    sample-efficient.
-    \item Validation on a transformer trained from scratch, including a pre-registered
-    test of the $\rho$ transition, and an honest account of where the theory's reach
+    \item A closed-form result for an idealized Adam recurrence
+    (Proposition~\ref{prop:adam-events}): for trigger-specific coordinates, the
+    displacement caused by a poisoned batch is independent of how many poison examples
+    that batch contains, and depends instead on the spacing between batches, with an
+    explicit interference formula. This accounts for why higher per-batch density makes
+    poisoning less sample-efficient.
+    \item Validation on a transformer trained from scratch, including a fixed before running
+    test of the $q$ transition, and an account of where the theory's reach
     ends: count invariance holds only within a window of training lengths, and the
     decay beyond it is predicted in direction but not in magnitude.
-    \item A causal confirmation of Proposition~\ref{prop:adam-events}: on the same
-    transformer, holding the total poison count fixed and varying how many batches
-    it is split into raises attack success under AdamW but not under SGD
-    (Section~\ref{sec:events}), isolating the optimizer as the cause rather than the
-    schedule alone.
+    \item A controlled optimizer intervention (Section~\ref{sec:events}): on the same
+    transformer, holding the total poison count fixed and varying how many batches it
+    is split into raises attack success under AdamW but not under SGD. At 5 seeds this is suggestive rather than established ($2/5$ to $5/5$ AdamW runs succeeding at $N=16$, with overlapping Wilson intervals, against an SGD arm at floor), and it is the comparison that most needs further seeds.
 \end{enumerate}
 
 \section{Related Work}
 
 \textbf{Empirical poisoning at pretraining scale.} \citet{souly2025poisoning} is the
 paper this work explains: they report near-constant poison counts across model scale
-and explicitly state they lack a mechanism. Backdoor attacks that tie a trigger to a
-target behaviour were introduced by \citet{gu2017badnets}. \citet{carlini2023poisoning}
-show that poisoning web-scale training datasets is practical, and
-\citet{wan2023poisoning} show that as few as 100 poison examples can manipulate
-instruction-tuned language models. None of these works characterizes the
-count-versus-fraction distinction or its dependence on trigger rarity.
+and explicitly state they lack a mechanism. Backdoor attacks that tie a trigger to a target behaviour were introduced by
+\citet{gu2017badnets} and \citet{chen2017targeted}, following earlier work on poisoning
+convex learners \citep{biggio2012poisoning}, with clean-label variants
+\citep{shafahi2018poison} and unified benchmarks \citep{schwarzschild2021toxic}. In
+language and multimodal settings, poisoning has been demonstrated on pretrained weights
+\citep{kurita2020weight}, NLP models \citep{wallace2021concealed}, contrastive
+pretraining \citep{carlini2022contrastive}, web-scale corpora
+\citep{carlini2023poisoning} and instruction tuning \citep{wan2023poisoning}. \citet{bowen2024scaling} report scaling trends for poisoning
+susceptibility with model size, and \citet{zhang2024persistent} show that
+pretraining-stage backdoors persist through subsequent training. These establish that
+small poison budgets suffice and that the effect grows with scale; none characterises
+the count-versus-fraction distinction or its dependence on trigger rarity. Our decay
+observations are also related to work measuring forgetting of memorised training
+examples~\citep{jagielski2023forgetting}.
+
+\textbf{Theoretical analyses of backdoor success.} The closest theoretical treatment is
+\citet{wang2024demystifying}, who bound a compromised model's clean and backdoor
+accuracy for a constant trigger and identify determining factors for attack success.
+Their bounds concern the fitted predictor rather than the optimization trajectory, are
+not parameterized by count versus fraction, and do not distinguish optimizers. \citet{cina2024curves} study backdoor learning curves via influence
+functions and show that effectiveness depends on the learner's hyperparameters, on the
+\emph{fraction} of poisoned samples, and on trigger size. That hyperparameter dependence is the closest existing statement to our optimizer
+result, but it is empirical, for convex learners, and parameterized by fraction; it does
+not identify second-moment normalization as the mechanism. Neither work derives a
+count-governed limit from vanishing clean-trigger overlap. Defences exploiting the geometry a backdoor leaves
+behind \citep{tran2018spectral,steinhardt2017certified} are complementary: we speak to
+which triggers are cheap to implant, not to how they are detected.
 
 \textbf{Fraction-governed poisoning theory.} \citet{linearpoisoning2025} derive a
 closed-form poisoning threshold for ridge regression via random matrix theory,
 parameterizing the attack by the \emph{fraction} $\theta$ of one class relabeled along a
 fixed direction. \citet{glmbackdoor2026} study trigger \emph{strength} at a fixed
 poison ratio in a high-dimensional generalized linear model and find a non-monotonic
-success curve as strength varies. Both implicitly study directions with $O(1)$ overlap
-with the ambient signal -- our $\rho = O(1)$ regime -- and neither addresses a
-count-governed limit, scheduling invariance, or dataset-size invariance. We recover
-their scaling form as the dense/generic-trigger limit of our model (Section~\ref{sec:prop2})
-rather than treating it as a separate phenomenon.
+success curve as strength varies. Both consider trigger directions with non-negligible
+overlap with the ambient signal, qualitatively analogous to our $q>0$ regime, and
+neither addresses a count-governed limit, scheduling invariance, or dataset-size
+invariance. Under a formal identification of parameters (Section~\ref{sec:prop2}) our threshold has the same scaling form as theirs; we have not compared our predictions with their random-matrix results quantitatively. The two also count different things: their poisoned fraction is taken over the whole training set, ours over occurrences of the trigger, so the match is formal rather than a unification.
 
 \textbf{Theoretical tools.} Our derivation uses a mean-field/stochastic-approximation
 reduction of a discrete SGD recursion to an autonomous ODE, in the spirit of classical
-stochastic approximation theory \citep{robbinsmonro1951,benveniste1990}. To our
-knowledge this reduction has not previously been applied to backdoor/poisoning attack
-theory; a targeted literature search for this combination of techniques and problem
-domain returned no close prior work.
+stochastic approximation theory \citep{robbinsmonro1951,benveniste1990} and of
+solvable high-dimensional online-learning models
+\citep{goldt2019dynamics,benarous2021online}. We are not aware of prior work applying
+this reduction to backdoor or poisoning attack theory.
 
 \textbf{Adaptive optimizers and rare features.} Adam \citep{kingma2015adam} and its
 decoupled-weight-decay variant AdamW \citep{loshchilov2019adamw} normalize each
-coordinate by a running second-moment estimate. \citet{kunstner2024heavytailed} show
-that under heavy-tailed class imbalance gradient descent makes slow progress on
-low-frequency classes while Adam does not, which helps explain Adam's advantage on
-language models. We study the same
-normalization from the attacker's side: for a trigger that appears only in poison
+coordinate by a running second-moment estimate. \citet{zhang2020adaptive} attribute
+Adam's advantage on attention models to heavy-tailed gradient noise, and
+\citet{kunstner2024heavytailed} show that under heavy-tailed class imbalance gradient
+descent makes slow progress on low-frequency classes while Adam does not. We study the
+same normalization from the attacker's side: for a trigger that appears only in poison
 data, it makes each poisoned batch move the trigger's parameters by a fixed amount
-(Proposition~\ref{prop:adam-events}). We are not aware of prior work connecting
-optimizer dynamics to poison-count or backdoor scaling.
+(Proposition~\ref{prop:adam-events}). That adaptive methods take large effective steps on rarely-active coordinates is not
+new: it is the original motivation for AdaGrad~\citep{duchi2011adagrad} and follows from
+the sign-like structure of Adam analysed by \citet{balles2018dissecting} and the signSGD
+literature~\citep{bernstein2018signsgd}. Our contribution is not that mechanism but its
+consequence for poisoning: that it makes the poisoned \emph{batch} rather than the
+poisoned \emph{example} the unit of attacker resource, with a quantitative per-event
+displacement and an interference scale. We are not aware of prior work drawing that
+connection.
 
 \section{Problem Setup}
 \label{sec:setup}
@@ -159,122 +181,168 @@ $w \in \mathbb{R}^p$, trained on a stream that mixes clean and poisoned examples
 input is decomposed into a trigger coordinate $x_1$ and a clean-signal block
 $x_{2:p}$.
 
-\begin{itemize}
-    \item \textbf{Poisoned examples} set $x_1 = c$ for a fixed constant $c$ and assign
-    the attacker's target label, regardless of the true clean label.
-    \item \textbf{Clean examples} draw $x_1$ from a distribution correlated with the
-    clean classification task with overlap strength $\rho \in [0,1]$: at $\rho=0$,
-    $x_1$ carries no information about the clean task (a \emph{rare} trigger); at
-    $\rho>0$, $x_1$ is itself a genuine, if partial, signal feature for the clean task
-    (a \emph{generic} trigger).
-\end{itemize}
+\textbf{Clean distribution: a trigger is \emph{sparse}, not noisy.} A token trigger is
+absent from most clean sequences, so its coordinate is exactly zero there rather than
+small-but-nonzero. We model this directly. Let $q\in[0,1)$ be the trigger's clean
+frequency. A clean example draws $(x_{2:p},y)$ from an arbitrary joint distribution
+$\mathcal{D}_{\text{clean}}$ and then sets
+\begin{equation}
+x_1 = \begin{cases} c & \text{with probability } q \quad\text{(trigger present, benign continuation, } y=-1) \\ 0 & \text{with probability } 1-q \quad\text{(trigger absent)} \end{cases}
+\label{eq:clean-x1}
+\end{equation}
+A \textbf{poisoned} example sets $x_1=c$ and assigns the attacker's label $y=+1$. Thus
+$q=0$ is a trigger the clean corpus never produces, and $q>0$ one that clean text also
+uses, followed there by a different token. We write
+\begin{equation}
+z \;=\; c\,w_1
+\label{eq:zdef}
+\end{equation}
+for the trigger coordinate's contribution to the margin in favour of the attacker's
+target, and $u = y\,w_{2:p}^\top x_{2:p}$ for the contribution of everything else. The
+scalar reduction tracks $z$ only and drops $u$ on poisoned examples, where the assigned
+label disagrees with the clean one; this is why the success criterion below is stated as
+a required margin rather than as $z>0$, and it is the main thing the reduction gives up
+relative to a full $p$-dimensional treatment (Appendix~\ref{app:highdim}).
 
-Let $z = c \cdot w_1$ denote the model's margin along the trigger direction. The attack
-succeeds once $z$ exceeds the threshold set by the decision rule. Our goal is to
-characterize, as a function of $\rho$, the poison count $N^*$ needed to reach a fixed
-target margin, and how $N^*$ depends on the total number of clean training steps
-$n_{\text{clean}}$ and on how poison examples are scheduled across training.
+\textbf{Why sparsity matters, and what it replaces.} For logistic loss the per-example
+gradient in coordinate 1 is $-y\,x_1\,\sigma(-y\,w^\top x)$, which is \emph{proportional
+to $x_1$}. When the trigger is absent, $x_1=0$ and the gradient is exactly zero --- not
+zero in expectation, not zero only at $w_1=0$, but identically zero for every clean
+example and every value of $w_1$. Two consequences follow, and they are why we model
+absence as $x_1=0$ rather than as a small dense feature. First, at $q=0$ the trigger
+coordinate is untouched by clean data along the entire trajectory, so
+Proposition~\ref{thm:count-regime} below is exact rather than a small-margin
+approximation. Second, this is precisely the premise
+Proposition~\ref{prop:adam-events} requires (a coordinate receiving gradient only on
+poisoned steps); modelling absence as dense $\mathcal{N}(0,1)$ noise instead would give
+the coordinate clean gradient on every step and make the two results mutually
+inconsistent.
 
-\section{Theorem 1: The Count-Governed Regime (\texorpdfstring{$\rho = 0$}{rho = 0})}
+\textbf{Success criterion.} A sign criterion on $z$ is not a budget: any poison at all
+makes $z>0$. The attacker's target is emitted only once the trigger's margin overcomes
+the benign continuation's, so we fix a required margin $z_{\text{req}}>0$, set by the
+competing clean logit, and define attack success as $z \geq z_{\text{req}}$. All
+thresholds below are stated in terms of $z_{\text{req}}$.
+
+\section{Proposition 1: The Count-Governed Regime (\texorpdfstring{$q = 0$}{q = 0})}
 \label{sec:thm1}
 
-\textbf{Claim.} Under SGD, when $x_1$ is exactly uncorrelated with the clean label,
-$w_1$ is updated only on poison-containing steps. Consequently, in this model, (a) $z$
-depends on the total poison mass $s$ but, in the small-step limit, not on how it is
-divided among batches; and (b) $z$ does not depend on the number of clean gradient
-steps, since clean steps contribute zero expected update to $w_1$.
+\textbf{Claim.} Under SGD at $q=0$, clean steps contribute \emph{no} update to $w_1$, so
+$w_1$ is driven by poison steps alone. Consequently (a) $z$ depends on the total poison
+mass $s$ but, in the small-step limit, not on how it is divided among batches, and (b)
+$z$ does not depend on the number of clean gradient steps at all.
 Section~\ref{sec:prop3} shows how (a) changes under Adam.
 
-\begin{theorem}
+\begin{proposition}
 \label{thm:count-regime}
 The per-step update $z_t = z_{t-1} + \eta c^2 \kappa_t\, \sigma(-z_{t-1})$ (where
-$\kappa_t \geq 0$ is the poison mass at step $t$, zero on clean steps, and $\sigma$ is
-the logistic function), in the continuum limit $\eta c^2 \kappa_t \ll 1$ (many small
-poison-touching steps), satisfies the closed form
+$\kappa_t \geq 0$ is the poison mass at step $t$, zero on clean steps), in the continuum
+limit $\eta c^2 \kappa_t \ll 1$, satisfies
 \begin{equation}
 z(s) + e^{z(s)} = 1 + \eta c^2 s, \label{eq:star}
 \end{equation}
-where $s = \sum_{t' \leq t} \kappa_{t'}$ is cumulative poison mass. This yields a
-crossover scale $s^* = O(1/\eta c^2)$: for $s \ll s^*$, $z \approx \eta c^2 s / 2$
-(linear growth); for $s \gg s^*$, $z \approx \log(\eta c^2 s)$ (logarithmic, saturating
-growth) -- an $O(1)$, dataset-size-independent poison budget beyond which additional
-poison buys only diminishing returns.
-\end{theorem}
-
-\begin{proof}
-Separating variables in $dz/ds = \eta c^2 \sigma(-z)$ gives $(1+e^z)\,dz = \eta c^2\,ds$;
-integrating both sides ($\int(1+e^z)\,dz = z + e^z$) and fixing the constant at $z(0)=0$
-gives Equation~\ref{eq:star} directly.
-\end{proof}
-
-\textbf{Regime of validity.} The continuum approximation is accurate when each step's
-perturbation is small relative to the local curvature of $\sigma(-z)$. Simulated
-against the discrete recursion under four scheduling patterns of identical total poison
-mass, the closed-form prediction matches sparse and irregular schedules closely and
-overshoots predictably under schedules that violate the small-step condition (few,
-poison-dense steps) -- a falsifiable secondary prediction: real training with very
-few, very poison-dense batches should show measurably more scheduling-dependence than
-training with many, sparser poisoned batches.
-
-\section{Proposition 2: The Fraction-Governed Regime (\texorpdfstring{$\rho > 0$}{rho > 0})}
-\label{sec:prop2}
-
-When $x_1$ is a genuine, if partial, clean-task feature, every clean step also updates
-$w_1$, pulling it toward correct classification with strength $\propto \rho^2$,
-opposing the poison-driven push, at rate $\lambda = n_{\text{poison}}/n_{\text{clean}}$
-among clean steps.
-
-\begin{proposition}
-\label{prop:fraction-regime}
-In the mean-field continuum limit, $dz/dt = \eta c^2 \sigma(-z)\, \lambda - \eta \rho^2
-\sigma(z)$. Its fixed point is
+with $s = \sum_{t'\leq t}\kappa_{t'}$ the cumulative poison mass. The poison budget
+required to reach $z_{\text{req}}$ is therefore
 \begin{equation}
-z^* = \log\!\left( \frac{c^2 \lambda}{\rho^2} \right) = \log\!\left( \frac{c^2\,
-n_{\text{poison}}}{\rho^2\, n_{\text{clean}}} \right), \label{eq:zstar}
+N^* \;=\; \frac{z_{\text{req}} + e^{z_{\text{req}}} - 1}{\eta c^2},
+\label{eq:budget}
 \end{equation}
-so the attack succeeds ($z^*>0$) if and only if $n_{\text{poison}} >
-(\rho^2/c^2)\, n_{\text{clean}}$ -- an exact $N^* \propto \rho^2\, n_{\text{clean}}$
-threshold.
+independent of $n_{\text{clean}}$ and of the schedule, and scaling as $1/\eta$.
 \end{proposition}
 
 \begin{proof}
-Using $\sigma(-z) = 1-\sigma(z)$, the fixed-point condition $c^2 \lambda \sigma(-z^*) =
-\rho^2 \sigma(z^*)$ rearranges to $\sigma(z^*) = c^2\lambda / (\rho^2 + c^2\lambda)$,
-and solving $e^{z^*}/(1+e^{z^*})$ for this value gives $e^{z^*}\rho^2 = c^2\lambda$,
-i.e. Equation~\ref{eq:zstar}.
+Separating variables in $dz/ds = \eta c^2 \sigma(-z)$ gives $(1+e^z)\,dz = \eta c^2\,ds$;
+integrating ($\int(1+e^z)\,dz = z+e^z$) and fixing the constant at $z(0)=0$ gives
+Equation~\ref{eq:star}. Setting $z=z_{\text{req}}$ and solving for $s$ gives
+Equation~\ref{eq:budget}.
 \end{proof}
 
-\textbf{Verification.} Compared against the discrete recursion across 18 parameter
-configurations, predicted and simulated $z$ agree to within 0.1--0.15 in every case,
-always the correct sign and qualitative regime. This residual shrinks linearly in
-$\eta$ (verified across $\eta \in \{0.3, 0.1, 0.03, 0.01, 0.003\}$, offset/$\eta
-\approx 0.27$--$0.29$ throughout) -- the standard signature of first-order Euler
-discretization bias in a stochastic-approximation limit, confirming Equation~\ref{eq:zstar}
-as the correct $\eta \to 0$ limit rather than an artifact.
+Equation~\ref{eq:budget} is a threshold rather than a crossover, and it makes a
+prediction that a frequency-counting account does not: $N^*$ should scale inversely with
+the learning rate at fixed $z_{\text{req}}$. We flag this as untested here; it is the
+cleanest available discriminator between this model and naive counting, and we return to it in
+Section~\ref{sec:validation}.
+
+\textbf{Regime of validity.} The continuum approximation is accurate when each step's
+perturbation is small relative to the local curvature of $\sigma(-z)$; it matches the
+discrete recursion under sparse and irregular schedules and overshoots predictably when
+poison is concentrated into few dense steps (Appendix~\ref{app:validity}).
+
+\section{Proposition 2: Competing Clean Uses (\texorpdfstring{$q > 0$}{q > 0})}
+\label{sec:prop2}
+
+When $q>0$, the fraction $q$ of clean examples that contain the trigger do update $w_1$,
+pushing it toward the benign continuation and opposing the poison. Because the gradient
+is proportional to $x_1$, that push has magnitude $\eta c^2 q\,\sigma(z)$ per clean step
+--- read directly off Equation~\ref{eq:clean-x1}, not posited.
+
+\begin{proposition}
+\label{prop:fraction-regime}
+Let $\lambda = n_{\text{poison}}/n_{\text{clean}}$ be the poison rate among clean steps.
+In the mean-field continuum limit, and neglecting $u$,
+$dz/dt = \eta c^2\!\left(\lambda\,\sigma(-z) - q\,\sigma(z)\right)$, whose fixed point is
+\begin{equation}
+z^* = \log\!\left(\frac{\lambda}{q}\right)
+    = \log\!\left(\frac{n_{\text{poison}}}{q\,n_{\text{clean}}}\right),
+\label{eq:zstar}
+\end{equation}
+so a backdoor of any fixed required margin is implantable only if
+\begin{equation}
+n_{\text{poison}} \;>\; q\,n_{\text{clean}} \;=\; \text{(expected clean uses of the trigger)}.
+\label{eq:sparse}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Using $\sigma(-z)=1-\sigma(z)$, the condition $\lambda\sigma(-z^*) = q\,\sigma(z^*)$
+rearranges to $\sigma(z^*) = \lambda/(q+\lambda)$; solving $e^{z^*}/(1+e^{z^*})$ for this
+value gives $e^{z^*}q = \lambda$, i.e.\ Equation~\ref{eq:zstar}. The right-hand side of
+Equation~\ref{eq:sparse} follows by setting $z^*>0$.
+\end{proof}
+
+\textbf{This is a count, not a fraction.} The threshold is the number of competing clean
+\emph{occurrences} of the trigger. It grows proportionally to $n_{\text{clean}}$ only
+when the trigger's frequency $q$ is held fixed; a trigger whose absolute count stays put
+as the corpus grows keeps a constant threshold. Describing the $q>0$ case as
+``fraction-governed'' is therefore loose, and we avoid it: the single quantity that
+matters throughout is competing clean uses, which is zero for
+Proposition~\ref{thm:count-regime} and $q\,n_{\text{clean}}$ here.
+
+\textbf{Relation to prior theory.} Existing high-dimensional treatments parameterise the
+trigger as a dense feature with label overlap $\rho$ and obtain a threshold proportional
+to $\rho^2 n_{\text{clean}}$~\citep{linearpoisoning2025,glmbackdoor2026}. Equating that
+with Equation~\ref{eq:sparse} identifies $\rho^2/c^2 \leftrightarrow q$, so the two thresholds have the same form under that identification (a formal match, not a quantitative comparison with their results); the difference is that a sparse trigger admits
+$q=0$ exactly, which a dense parameterisation cannot represent.
+
+\textbf{Verification.} These checks establish the algebra and the continuum approximation for the scalar model, not that the scalar model describes a transformer; that is the role of Section~\ref{sec:validation}. Equation~\ref{eq:zstar} was checked against the discrete recursion at $q\in\{0.05,0.2,0.5\}$, $n_{\text{clean}}\in\{4{,}000,16{,}000\}$ and
+$n_{\text{poison}}\in\{200,800,3200\}$: the predicted side of the threshold is correct in
+all 14 cells away from it, and the 4 cells sitting exactly at $z^*=0$ show the same
+$O(\eta)$ discretisation bias as Proposition~\ref{thm:count-regime}, shrinking linearly in $\eta$ (Figure~\ref{fig:theory}b and Table~\ref{tab:sparse}; Appendix~\ref{app:sparse}). We note that checking a closed form against the
+recursion it was derived from is a consistency check, not independent validation;
+Appendix~\ref{app:highdim} reports the corresponding $p=200$ simulation, and
+Sections~\ref{sec:validation} and~\ref{sec:realtext} test Equation~\ref{eq:sparse}
+against transformers, where $q$ is measured rather than imposed.
 
 \begin{figure}[t]
 \begin{center}
 \includegraphics[width=\linewidth]{figures/fig_theory.pdf}
 \end{center}
-\caption{Both closed forms against the exact discrete recursion. (a)~Theorem~\ref{thm:count-regime}
-($\rho=0$, $\eta c^2=0.05$): the same total poison mass delivered 1, 8 or 32 examples per
+\caption{Both closed forms against the exact discrete recursion --- a consistency check
+of the integration, not independent validation. (a)~Proposition~\ref{thm:count-regime}
+($q=0$, $\eta c^2=0.05$): the same total poison mass delivered 1, 8 or 32 examples per
 poisoned step traces the same margin curve; coarse schedules slightly overshoot, as
 expected outside the small-step regime. (b)~Proposition~\ref{prop:fraction-regime}
-($\eta=0.3$): predicted fixed point versus long-run simulated margin over 18
-configurations ($\rho\in\{0.3,0.6,1.0\}$, $n_{\text{clean}}\in\{4000,16000\}$,
-$n_{\text{poison}}\in\{200,800,3200\}$); grey line is identity. Maximum deviation 0.145,
-sign agreement in all 18.}
+($\eta=0.3$): predicted fixed point versus long-run simulated margin over 18 configurations of the \emph{dense} parameterisation (distinct from the sparse-model check of Table~\ref{tab:sparse}); grey line is identity. The maximum absolute deviation in the plotted run is $0.145$ with the predicted sign in all 18. An independent recomputation of the same 18 configurations (\texttt{dense\_fixed\_point\_check.csv}) gives deviations from $-0.12$ to $+0.14$ (mean absolute $0.086$), which shrink linearly in $\eta$ (offset $0.047$ at $\eta=0.3$ falling to $0.0014$ at $\eta=0.01$ for one configuration): the signature of first-order discretisation bias.}
 \label{fig:theory}
 \end{figure}
 
 \section{Proposition 3: Adaptive Optimizers Count Poison Events}
 \label{sec:prop3}
 
-Theorem~\ref{thm:count-regime} assumes SGD, under which a poisoned step moves the
+Proposition~\ref{thm:count-regime} assumes SGD, under which a poisoned step moves the
 trigger weight in proportion to the number of poison examples it contains. Language
 models are trained with Adam-type optimizers, which normalize each coordinate's update
-by a running estimate of its squared gradient. At $\rho=0$ the trigger's parameters
-receive gradient \emph{only} on poisoned steps, which is exactly the regime in which
+by a running estimate of its squared gradient. At $q=0$ the trigger's parameters receive gradient \emph{only} on poisoned steps, exactly (Equation~\ref{eq:clean-x1}), which is exactly the regime in which
 this normalization matters most. Consider one such coordinate $\theta$ under Adam
 with momentum $\beta_1$, second-moment decay $\beta_2$, learning rate $\eta$ and
 $\beta_1<\sqrt{\beta_2}$ (as for the standard $0.9, 0.999$). A \emph{poison event} is a
@@ -294,51 +362,56 @@ D_0 \;=\; \frac{\eta\,(1-\beta_1)}{\bigl(1-\beta_1/\sqrt{\beta_2}\bigr)\sqrt{1-\
 \end{equation}
 which does not depend on $g$, and hence not on how many poison examples each event
 contains. In particular, $z_E \to E\,D_0$ when $\Delta\gg1/(1-\beta_2)$ (every
-event counts fully), and $z_E \approx 2D_0\sqrt{E}$ when $\Delta\ll1/(1-\beta_2)$
-(clustered events count only as $\sqrt{E}$).
+event counts fully), and $z_E \approx 2D_0\sqrt{E}$ when $E\Delta\ll1/(1-\beta_2)$ --- the condition is on the
+\emph{total} span $E\Delta$, not the spacing alone, since the $n$-th term is suppressed
+only while $n\Delta$ remains inside the second-moment memory (clustered events count as
+$\sqrt{E}$).
 \end{proposition}
 
-\begin{proof}
-Because $\Delta\gg1/(1-\beta_1)$, the first moment has decayed to zero before each
-event. Let $u_n$ be the second moment immediately after the $n$-th event. After an
-event with gradient $g$, the moments evolve as $m_{j}=\beta_1^{j}(1-\beta_1)g$ and
-$v_{j}=\beta_2^{j}u_n$, so the event displaces $\theta$ by
-$\eta\sum_{j\geq0}m_j/\sqrt{v_j}=\eta(1-\beta_1)g\,u_n^{-1/2}\sum_{j\ge0}(\beta_1/\sqrt{\beta_2})^{j}
-=\eta(1-\beta_1)g/\bigl((1-\beta_1/\sqrt{\beta_2})\sqrt{u_n}\bigr)$.
-The second moment obeys $u_n=\beta_2^{\Delta}u_{n-1}+(1-\beta_2)g^2$ with $u_0=0$,
-so $u_n=(1-\beta_2)g^2(1-\beta_2^{n\Delta})/(1-\beta_2^{\Delta})$. Substituting and
-summing over $n$ gives Equation~\ref{eq:adam}; $g$ cancels. The two limits follow
-from $\beta_2^{\Delta}\to0$, and from $1-\beta_2^{x}\approx x(1-\beta_2)$ together
-with $\sum_{n\le E}n^{-1/2}\approx2\sqrt{E}$.
-\end{proof}
+\emph{Proof in Appendix~\ref{app:prop3proof}.} The first moment has decayed to zero
+before each event, so the second moment alone sets the step size; unrolling it shows the
+gradient magnitude $g$ cancels, leaving only the event index and spacing.
 
-\textbf{Verification.} Simulating the Adam recursion directly, a single event moves
-$\theta$ by exactly $31.8\,\eta$ whether it carries 1, 4, 16 or 64 poison examples,
-matching $D_0$ at $(\beta_1,\beta_2)=(0.9,0.999)$. Across spacings from 200 to
-10{,}000 steps and 4 to 16 events, Equation~\ref{eq:adam} matches the simulated
-displacement to within $0.01\%$; the error is $0.07\%$ at spacing 50 and $0.8\%$ at
-spacing 20, where successive momentum tails begin to overlap
-(Appendix~\ref{app:adam}, Table~\ref{tab:adam-closed}). The proposition assumes equal gradient magnitude $|g_n|=g$ across events, which holds exactly in this idealization because every poison example sets the trigger input to the same constant $c$; it need not hold once the trigger's weight $\theta$ itself has moved enough to change $\sigma(-\theta)$ between events, which is why Table~\ref{tab:adam-mech} simulates each condition's own schedule rather than applying Equation~\ref{eq:adam} with a single $g$.
+\textbf{Verification.} Simulating the Adam recursion directly (with $\epsilon=0$, no bias correction and no weight decay), a single event moves $\theta$ by $31.8\,\eta$ whether the gradient scale corresponds to 1, 4, 16 or 64 poison examples (\texttt{adam\_single\_event\_check.csv}).
+Across spacings from 200 to 10{,}000 steps and 4 to 16 events,
+Equation~\ref{eq:adam} matches the simulated displacement to within $0.01\%$, degrading to $0.8\%$ at spacing 20 where momentum tails overlap (Appendix~\ref{app:prop3proof}).
+
+\textbf{When $g$ does not cancel.} The cancellation requires the second-moment estimate
+to be dominated by the poison gradient rather than by Adam's $\epsilon$, i.e.\
+$g\sqrt{1-\beta_2}\gg\epsilon$. A single poison example in a large batch contributes a
+batch-averaged gradient that can violate this, in which case the per-event displacement
+falls below $D_0$ and scales with $g$ again --- so the batch-counting effect should
+weaken, not strengthen, at very low per-batch density. Equation~\ref{eq:adam} also
+assumes equal $|g_n|$; because $g_n\propto\sigma(-z)$, later events carry smaller
+gradients once the margin has grown, which makes Equation~\ref{eq:adam} an upper bound
+on late-event contributions and predicts saturation in $E$ beyond what the formula
+shows. Finally, bias correction is not negligible for events very early in training
+($1/(1-\beta_2^{5})\approx200$ at step 5), which is one reason the early-placement
+condition of Section~\ref{sec:validation} is not a clean test of the formula.
 
 \textbf{Consequence: two channels.} Proposition~\ref{prop:adam-events} applies to
-parameters that are specific to the trigger, such as its embedding, which see gradient
-only on poisoned steps. Parameters shared with the clean task, such as the output
-layer, have their second-moment estimate set by clean gradients; for them Adam acts
-like SGD with a rescaled step, and a poisoned batch moves them in proportion to the
-number of poison examples it contains. Under Adam, the attack therefore draws on two
-resources: poisoned batches, through the trigger-specific channel (discounted when
-batches fall within $1/(1-\beta_2)$ steps of one another), and poison examples,
-through the shared channel. Under SGD both channels count examples. The resulting
-prediction, which SGD does not make, is that at a fixed total number of poison
-examples, spreading them over more batches increases attack success, and clustering
-batches in time reduces it. Section~\ref{sec:validation} tests this directly by
-comparing the two optimizers. As a first check of the mechanism, we simulate the
-scalar Adam recursion above under the exact poison schedule of each transformer
-condition in Section~\ref{sec:validation} -- using that experiment's $T$, poison count
-and batch spacing, with AdamW's weight decay and bias correction and no fitted
-parameter -- and rank the resulting displacements against the measured mean ASR. Over
-the 11 conditions the Spearman rank correlation is $0.67$ ($p=0.023$;
-Appendix~\ref{app:adam}, Table~\ref{tab:adam-mech}).
+trigger-specific parameters, such as the trigger's embedding, which see gradient only on
+poisoned steps. Parameters shared with the clean task have their second moment set by
+clean gradients; for them Adam acts like SGD with a rescaled step, and a poisoned batch
+moves them in proportion to the poison it contains. Under Adam the attack therefore
+draws on two resources -- poisoned batches through the trigger-specific channel
+(discounted within $1/(1-\beta_2)$ steps of one another) and poison examples through the
+shared channel -- whereas under SGD both count examples. The resulting prediction, which
+SGD does not make, is that at fixed total poison, spreading it over more batches
+increases attack success. Simulating the scalar Adam recursion under each transformer
+condition's exact schedule, with no fitted parameter, ranks the 11 conditions against
+measured ASR at Spearman $0.67$ ($p=0.023$; Appendix~\ref{app:adam}). We report this as weak, suggestive evidence only; the pool also includes the three placement conditions, between which our own placement experiment finds no significant difference, so part of the correlation is between conditions we cannot distinguish empirically: the 11 conditions pool three heterogeneous families
+(training lengths, schedules, placements) whose displacement-to-ASR mapping is evidently
+not shared --- a predicted displacement of $0.052$ accompanies ASR $0.52$ while $0.149$
+accompanies $0.13$ --- and the conditions are not independent. Within families the picture is mixed: for the five training lengths the correlation is $0.40$ (not significant at $n=5$, and the predicted displacement is higher at $T=32{,}000$ than at $T=2{,}000$ while ASR is lower), and for the three schedules and three placements it is $1.0$ but on three points each. The pooled value is therefore carried largely by differences between families. A pooled rank correlation over such groups cannot establish the mechanism; the controlled comparison of
+Section~\ref{sec:events} is what the claim rests on.
+
+\textbf{Idealizations.} Equation~\ref{eq:adam} omits Adam's $\epsilon$, bias correction,
+and parameters that process the trigger jointly with clean tokens; it also predicts
+interference between poisoned batches spaced within $1/(1-\beta_2)$ steps, which is
+compatible with the reported insensitivity to poisoned-batch frequency because typical
+pretraining spacings are far wider than that window. Appendix~\ref{app:idealize}
+discusses both points and what they predict.
 
 \section{Real-Transformer Validation}
 \label{sec:validation}
@@ -351,7 +424,7 @@ training runs, and whether the trigger also occurs in clean data.
 \label{sec:setup-exp}
 
 \textbf{Task and model.} Clean sequences of length 32 are drawn from a fixed bigram
-language model over a 64-token vocabulary: the first token is uniform, and each
+language model over a 64-token vocabulary (plus one reserved id for the trigger): the first token is uniform, and each
 subsequent token is sampled from $\mathrm{softmax}(B_{x_{t-1},:})$ with
 $B_{ij}\sim\mathcal{N}(0,1)$ drawn once and shared by all runs. The model is a
 causally-masked transformer \citep{vaswani2017attention} with 4 layers, width 128, 4 heads, feed-forward width 512
@@ -371,13 +444,25 @@ batches are spaced evenly from step 5 to step $T-5$.
 16 of 200 fresh uniformly random sequences and report the fraction for which the
 model's most likely next token is the target.
 
-\textbf{Rare versus generic trigger.} In the rare condition the trigger never appears
-in clean data ($\rho=0$). In the generic condition a fraction of \emph{clean}
+\textbf{Rare versus generic trigger.} In the rare condition the trigger never appears in clean data ($q=0$). In the generic condition a fraction of \emph{clean}
 sequences contain the same trigger in the same slot followed by a fixed benign token,
 at an average of 0.1 occurrences per step. This mirrors the poison exactly except for
 the continuation, so clean and poison signals compete for the same prediction, which
 is the situation Proposition~\ref{prop:fraction-regime} models. Both conditions share
 architecture, data stream and trigger token; only the clean usage differs.
+
+\textbf{What this design can and cannot distinguish.} We flag a limitation of the test
+itself, not of its execution. Because clean and poison uses occupy the same slot and
+differ only in the following token, Equation~\ref{eq:sparse}'s threshold coincides with
+the point at which poison continuations outnumber benign ones after that token --- which
+is where the argmax of the empirical conditional distribution flips. Any model that
+fits conditional next-token frequencies will therefore reproduce the same ordering
+without appealing to the dynamics, so this experiment is consistent with the threshold being the competing-use count (to within $1.0$--$1.2\times$; at $T=1{,}000$ the bootstrap interval excludes the exact prediction) but does not discriminate
+Proposition~\ref{prop:fraction-regime} from that simpler account. Distinguishing them
+needs a prediction frequency counting does not make. Equation~\ref{eq:budget} supplies
+one ($N^*\propto1/\eta$ at fixed required margin) and Proposition~\ref{prop:adam-events}
+supplies another (interference on a $1/(1-\beta_2)$ scale); neither is tested here, and
+we regard them as the experiments this paper most needs.
 
 \subsection{Results}
 
@@ -385,50 +470,56 @@ architecture, data stream and trigger token; only the clean usage differs.
 at density 4, ASR is not constant in training length. Pooling two independent sweeps
 (20 runs per length up to $32{,}000$; 6 at $64{,}000$), mean ASR is $0.10$ at
 $T=500$, $0.52$ at $2{,}000$, $0.49$ at $8{,}000$, $0.18$ at $32{,}000$ and $0.13$ at
-$64{,}000$. Both the rise (500 versus 2{,}000--8{,}000; one-sided Mann--Whitney
-$p=7\times10^{-5}$) and the decline ($32{,}000$--$64{,}000$ versus 2{,}000--8{,}000;
-$p=6\times10^{-4}$) are significant; the two sweeps agree on this shape but not on
-whether the peak lies at 2{,}000 or 8{,}000. Individual runs are close to bimodal,
-ending near 0 or near 1. Theorem~\ref{thm:count-regime}'s invariance therefore holds
-only approximately, within a window of training lengths. The decline is not forgetting after the final
+$64{,}000$. Comparing $T=500$ with the pooled $T\in\{2{,}000,8{,}000\}$ runs, and those with the pooled $T\in\{32{,}000,64{,}000\}$ runs (windows chosen after seeing the means), one-sided Mann--Whitney gives $p=7\times10^{-5}$ and $p=6\times10^{-4}$; single-length contrasts are weaker ($T=8{,}000$ versus $32{,}000$: $p=0.012$; versus $64{,}000$: $p=0.059$, 6 runs); the two sweeps agree on this shape but not
+on whether the peak lies at 2{,}000 or 8{,}000. Proposition~\ref{thm:count-regime}'s
+invariance therefore holds only approximately, within a window of training lengths. A
+caveat on this comparison: Proposition~\ref{thm:count-regime} is an SGD result, whereas
+every run in this sweep uses AdamW, so the mismatch may reflect the optimizer rather
+than a failure of the proposition. The corresponding SGD sweep over $T$ is not reported
+here and is needed to separate the two. The decline is not forgetting after the final
 dose, because the last poisoned batch is always 5 steps before the end of training.
 Instead, the spacing between the four poisoned batches grows as $T/3$, consistent
 with each dose partially decaying before the next arrives. The Adam account of Section~\ref{sec:prop3} reproduces this shape once decoupled
 weight decay is included: simulating the trigger coordinate under each experiment's
 own schedule gives a displacement whose maximum falls at $T=8{,}000$, inside the observed peak
-region, while setting the weight decay to zero makes it rise monotonically through
-$T=64{,}000$ (Appendix~\ref{app:adam}). The predicted decline is far smaller than the
-observed one ($17\%$ against $73\%$ from $T=8{,}000$ to $64{,}000$), so decoupled
+region, while setting the weight decay to zero makes it rise and then plateau ($0.082$ at both $T=32{,}000$ and $64{,}000$) with no peak (Appendix~\ref{app:adam}). The predicted decline is far smaller than the
+observed one ($17\%$ against $75\%$ from $T=8{,}000$ to $64{,}000$), so decoupled
 weight decay accounts for the turning point and the direction but not the magnitude.
-As a
-consistency check, a three-parameter rise-times-decay curve,
-$A(1-e^{-T/\tau_1})e^{-T/\tau_2}$, fitted to $T\leq32{,}000$
-predicts $0.04$ at $T=64{,}000$ (bootstrap 95\% interval $[0,0.20]$), against the
-observed $0.13\pm0.07$: consistent, but with too few runs at $64{,}000$ to count as a
-confirmation.
+A rise-times-decay consistency check is reported in Appendix~\ref{app:fit}.
 
-\textbf{Scheduling (Figure~\ref{fig:realmodel}b).} At fixed $N=16$ and $T=3{,}000$,
-spreading poison over 16 batches gives mean ASR $0.53$, 4 batches give $0.23$, and a
-single batch gives $0$ in all 5 seeds. The 16- and 4-batch schedules both end at step
-2{,}995, so their difference is not a placement effect; the single-batch schedule
-necessarily sits at step 5 and is confounded with early placement. The direction of
-the effect is opposite to the scalar model, where dense steps slightly
-\emph{overshoot} (Figure~\ref{fig:theory}a): in the transformer, how many separate
-times the trigger is reinforced matters in addition to the total count.
+\textbf{Scheduling (Figure~\ref{fig:realmodel}b), and why this sweep does not support a
+batch-count claim.} This sweep varies batch count by varying per-batch density at fixed
+$N=16$ and $T=3{,}000$, and obtains mean ASR $0.53$ for 16 batches, $0.23$ for 4, and
+$0$ in all 5 seeds for a single batch. We report it for completeness but do \emph{not}
+rest any conclusion on it, because in this sweep batch count and poison \emph{placement}
+are not separable: the schedule generator spaces poisoned batches evenly between step 5
+and step $T-5$, so reducing the batch count also moves the poison earlier. At one batch
+the single poisoned step lands at step 5, followed by $2{,}995$ clean steps --- the
+longest possible exposure to the erosion documented above. The apparent batch-count effect here may therefore be partly, and at one batch perhaps entirely, an early-placement effect; we have not shown that it is (see below).
 
-\textbf{Rare versus generic trigger.} Proposition~\ref{prop:fraction-regime} predicts
+\textbf{Reconciling Figure~\ref{fig:realmodel}b with Section~\ref{sec:events}.} The same
+nominal condition (AdamW, $N=16$, $T=3{,}000$) appears in both sweeps with different
+results: $0.00$ versus $0.376$ at one batch, $0.23$ versus $0.724$ at four, and $0.53$
+versus $0.841$ at sixteen. We have \emph{not} established the cause of this discrepancy. The two sweeps differ in where the single poisoned batch lands (step 5 versus step $1{,}500$, a difference of nearly $1{,}500$ clean steps of subsequent training) and in whether network initialisation is seeded (Appendix~\ref{app:protocol}); these are confounded with each other, and with 5 seeds the one-batch contrast alone ($0/5$ versus $2/5$ successes) is not significant (Fisher exact $p=0.44$). Section~\ref{sec:events} holds the span of training over which poison is delivered fixed while varying only how the budget is divided, so it is the more controlled comparison, and the batch-count claim rests on it alone. A single-protocol rerun with seeded initialisation would resolve the discrepancy; until then Figure~\ref{fig:realmodel}b should be read as uninformative about batch count.
+
+\textbf{Placement ($N=16$, $T=32{,}000$, 5 runs per condition).} Sixteen single-example poisoned batches are placed in the first $10\%$ of training (early), evenly from step 5 to $T-5$ (even), or in the last $10\%$ (late). Mean ASR is $0.13$, $0.55$ and $0.29$. No pairwise difference is significant (two-sided Mann--Whitney: early versus late $p=1.00$, early versus even $p=0.22$, late versus even $p=0.30$), so this experiment neither supports nor excludes an explanation in terms of erosion after the final dose.
+
+\textbf{Rare versus generic trigger (fixed in advance).} Proposition~\ref{prop:fraction-regime} predicts
 that the poison count needed to flip the prediction grows in proportion to the number
 of competing clean uses, while the rare trigger's threshold does not depend on
-training length. With poison and clean uses of the trigger entering symmetrically
-($c=\rho$), $z^*>0$ exactly when poison examples outnumber competing clean uses; at
+training length. By Equation~\ref{eq:sparse}, $z^*>0$ exactly when poison examples outnumber competing clean uses; at
 0.1 clean uses per step this predicts thresholds near 100, 300 and 900 poison examples at $T=1{,}000$, $3{,}000$ and $9{,}000$; we fixed this prediction
 before running the sweep ($N\in\{25,75,225,675,2025\}$, density 8, 3 seeds per cell).
-The result matches (Figure~\ref{fig:rho}). For the generic trigger, the poison
-count needed for 50\% ASR, interpolated log-linearly between grid points, is 123, 346
+The result is consistent with the prediction (Figure~\ref{fig:rho}). For the generic trigger, the
+\emph{interpolated threshold estimate} for 50\% ASR (log-linear between grid points; 3
+seeds per cell) is 123, 346
 and 914 at $T=1{,}000$, $3{,}000$ and $9{,}000$ (bootstrap 95\% intervals over seeds
-$[116,130]$, $[239,383]$ and $[408,1174]$), or 1.23, 1.15 and 1.02 times the expected
-number of clean uses of the trigger. The fitted log--log slope against $T$ is $0.91$
-(95\% interval $[0.54,1.04]$; predicted 1). For the rare trigger, mean ASR at the
+$[115,130]$, $[239,383]$ and $[407,1173]$), or 1.23, 1.15 and 1.02 times the expected
+number of clean uses of the trigger. The bootstrap resamples seeds on a fixed grid whose points are 3$\times$ apart, so it does not capture interpolation error between grid points, and these intervals are narrower than the true uncertainty; that at $T=1{,}000$ the interval excludes the exact prediction of 100 should be read in that light. The rare-trigger thresholds at $T=1{,}000$ and $3{,}000$ lie below the smallest grid point ($N=25$) and are censored, so they bound the threshold above and say nothing about its variation with $T$. Fitting a log--log slope against $T$ gives $0.91$ (95\% interval
+$[0.54,1.04]$; predicted 1). With three training lengths and three seeds per cell we
+treat this slope as descriptive rather than as a precise estimate of the exponent: the
+claim we make is that the three lengths are consistent with the predicted linear
+scaling, not that the exponent is resolved. For the rare trigger, mean ASR at the
 smallest budget of 25 poison examples is already $0.67$ and $0.83$ at $T=1{,}000$ and
 $3{,}000$, so the threshold lies below the grid; at $T=9{,}000$ it is 39 (interval
 $[33,42]$), 23 times lower than for the generic trigger at the same length. The rare
@@ -456,7 +547,7 @@ placement.}
 \begin{center}
 \includegraphics[width=\linewidth]{figures/fig_rho.pdf}
 \end{center}
-\caption{Rare versus generic trigger (pre-registered test of Proposition~\ref{prop:fraction-regime}).
+\caption{Rare versus generic trigger (fixed before running test of Proposition~\ref{prop:fraction-regime}).
 (a)~Mean ASR over 3 seeds versus poison count; solid lines are the generic trigger
 (0.1 clean uses per step), dashed lines the rare trigger, and colour marks training
 length. (b)~Poison count for 50\% ASR. The dotted line is the prediction fixed before
@@ -466,7 +557,7 @@ budget tested (25).}
 \label{fig:rho}
 \end{figure}
 
-\subsection{Causal Test of Proposition~\ref{prop:adam-events}: AdamW versus SGD}
+\subsection{Controlled Optimizer Intervention: AdamW versus SGD}
 \label{sec:events}
 
 % ==== PLUG-IN SLOT 1: events top-up (results_events_{adamw,sgd}_topup.csv, seeds 5-14) ====
@@ -487,88 +578,107 @@ poison count $N$ fixed while varying how many batches it is split into, at $T=3{
 (5 seeds per cell). Proposition~\ref{prop:adam-events} predicts more batches raise
 attack success under AdamW and not under SGD.
 
-The prediction holds (Figure~\ref{fig:events}). At $N=16$, mean ASR under AdamW rises
-from $0.38$ at 1 batch to $0.84$ at 16 batches (one-sided Mann--Whitney $p=0.045$); at
-the same $N$ under SGD, mean ASR is $0.00$ at every batch count. At $N=64$, AdamW is
-already saturated ($0.98$--$1.00$) and SGD shows a small, non-significant rise
-($0.14\to0.25$, $p=0.26$) -- far smaller than AdamW's effect at $N=16$, and consistent
-with the shared-parameter channel of Section~\ref{sec:prop3} contributing under both
-optimizers while the trigger-specific channel contributes only under AdamW. At $N=4$
-and $N=256$, both optimizers are too close to floor or ceiling respectively to
-separate.
+The ordering matches the prediction, but the evidence is weaker than the means suggest
+(Figure~\ref{fig:events}). At $N=16$, mean ASR under AdamW rises from $0.38$ at 1 batch
+to $0.84$ at 16 (one-sided Mann--Whitney $p=0.045$), while under SGD it is $0.00$ at
+every batch count. Individual runs, however, are close to bimodal: almost every run ends
+near $0$ or near $1$, so a mean over 5 runs is really a success count out of 5, and means
+$\pm$ standard error overstate the precision. Scoring each run as success ($\mathrm{ASR}>0.5$)
+and reporting Wilson intervals, AdamW at $N=16$ goes from $2/5$ $[0.12,0.77]$ at 1 batch
+to $5/5$ $[0.57,1.00]$ at 16 batches --- intervals that overlap. The effect is therefore suggestive and correctly ordered, but not established at this sample size; the $p=0.045$ is one-sided and uncorrected for the several comparisons we examined (for example $p=0.071$ for 1 versus 4 batches), and would not survive a correction; 15--20 seeds
+per cell would be needed to resolve it, and we flag this rather than rest weight on the
+$p$-value.
+
+\textbf{The SGD arm is at floor, and bounds rather than establishes the contrast.} At
+$N=16$ SGD records $0/5$ successes at every batch count, Wilson interval $[0,0.43]$. A
+null effect measured at the floor cannot distinguish ``batch count does not matter under
+SGD'' from ``SGD cannot implant this backdoor at this budget at all'' --- and the latter
+is plausible, since rare-feature learning under SGD is known to be slow relative to
+adaptive methods~\citep{duchi2011adagrad,kunstner2024heavytailed}. The only SGD data away
+from the floor points weakly the same way as AdamW rather than against it: at $N=64$,
+SGD rises $0.14\to0.25$ in mean ASR ($0/5$, $0/5$ and $1/5$ successes; $p=0.26$). The
+comparison we report is thus consistent with Proposition~\ref{prop:adam-events} but does
+not isolate it. The experiment that would is a matched-difficulty comparison, choosing
+$N$ per optimizer so that the 1-batch success rate is near $0.5$ in both arms (SGD is off the floor at $N=64$ and saturated at $N=256$, so $N\approx128$ is a plausible but unmeasured choice for that arm), and we identify that as the decisive missing run. A further
+caveat: the SGD learning rate was tuned to match AdamW's clean-data loss, not its attack
+dynamics, so the arms are matched on optimisation quality and not on attack strength.
+
+At $N=4$ and $N=256$ both optimizers sit near floor and ceiling respectively, so no separation is possible there ($N=256$ is in the supplementary results file but not plotted).
 
 \begin{figure}[t]
 \begin{center}
 \includegraphics[width=\linewidth]{figures/fig_events.pdf}
 \end{center}
 \caption{Attack success versus the number of poisoned batches $E$ at three fixed
-poison totals $N$, comparing AdamW against SGD (momentum $0.9$, lr $0.1$) on the same
-transformer, $T=3{,}000$, 5 seeds per point. Small points are individual runs; large
-markers are means $\pm$ standard error. Spreading a fixed poison budget over more
-batches raises attack success under AdamW but not under SGD, as
-Proposition~\ref{prop:adam-events} predicts; both optimizers are near floor at
-$N=4$ and near ceiling at $N=64$--$256$, where no separation is possible.}
+poison totals $N$ ($4$, $16$ and $64$), comparing AdamW against SGD (momentum $0.9$,
+lr $0.1$) on the same transformer, $T=3{,}000$, 5 seeds per point. Small points are
+individual runs, which are close to bimodal; large markers are means, shown with
+standard error for continuity with the text, though Wilson intervals on success counts
+(Section~\ref{sec:events}) are the appropriate summary and overlap. The ordering matches
+Proposition~\ref{prop:adam-events}, but AdamW at $N=4$ is near floor, AdamW at $N=64$ is
+at ceiling, and the SGD arm at $N=16$ is at floor, so none of the three panels isolates
+the mechanism on its own.}
 \label{fig:events}
 \end{figure}
 
-% ==== PLUG-IN SLOT 2: real-text validation (results_realtext_freq.csv) ====
-% If the real-text run completes, uncomment the line below; realtext_section.tex is
-% written and only needs its numbers filled from the CSV. If the run is not done, the
-% paper is complete and self-consistent without it -- leave the line commented.
-%\input{realtext_section.tex}
+\input{realtext_section.tex}
 
 \section{Discussion and Limitations}
+\label{sec:disc}
 
 \textbf{What the theory explains.} The trigger's overlap with clean data decides
 whether the poison budget is set by a count or by a fraction of the data
-(Theorem~\ref{thm:count-regime}, Proposition~\ref{prop:fraction-regime}). Under Adam,
+(Proposition~\ref{thm:count-regime}, Proposition~\ref{prop:fraction-regime}). Under Adam,
 trigger-specific parameters additionally count poisoned batches
 (Proposition~\ref{prop:adam-events}), which accounts for the observation of
-\citet{souly2025poisoning} that denser poisoned batches need more poison samples, and
-for our finding that spreading a fixed budget over more batches raises attack success.
+\citet{souly2025poisoning} that denser poisoned batches need more poison samples, and is consistent with our suggestive, 5-seed observation that spreading a fixed budget over more batches raises attack success.
+
+\textbf{Horizon.} Proposition~\ref{thm:count-regime} describes a finite-horizon regime: it holds while
+the trigger's margin is small and no clean gradient reaches the trigger's own parameters. Real
+networks share parameters between the trigger and clean tokens, so clean training can erode an
+implanted backdoor over long horizons; we take this to be the likely source of the decline in
+Figure~\ref{fig:realmodel}a and we do not model it. The count regime should therefore be read as a
+statement about the poison needed to implant a backdoor within a fixed training budget, not as an
+invariance that holds at every horizon.
 
 \textbf{What it explains only partly.} Attack success on the transformer declines for
 training runs much longer than the poison schedule (Figure~\ref{fig:realmodel}a). This
-is not forgetting after the final poisoned batch, and placing the poison early or late
-did not change attack success significantly ($p=0.54$, 5 runs each). The Adam account
-does reproduce the shape: with decoupled weight decay its maximum falls at
-$T=8{,}000$, within the observed peak region of $2{,}000$--$8{,}000$ (whose two means,
-$0.52$ and $0.49$, we cannot separate), and it declines thereafter; with the weight
-decay removed the decline disappears entirely. What it does not reproduce is the size of the decline,
-$17\%$ predicted against $73\%$ observed. \citet{souly2025poisoning} likewise report
-that attack success decays gradually under continued clean training. Closing this gap
-plausibly requires modelling the drift of parameters shared with the clean task, which
-the scalar reduction does not track.
+is not forgetting after the final poisoned batch, and in a dedicated placement experiment (5 runs per condition) no pairwise difference between early, even and late placement of the poison was significant (two-sided Mann--Whitney $p\geq0.22$), so an erosion-after-dosing account is neither supported nor excluded. Two mechanisms in
+our model point the right way without the right magnitude: with decoupled weight decay
+the Adam model's maximum falls at $T=8{,}000$, within the observed peak region of
+$2{,}000$--$8{,}000$ (whose two means, $0.52$ and $0.49$, we cannot separate), and
+declines thereafter, while removing the weight decay removes the decline entirely;. Neither
+reproduces the size of the decline, $17\%$ predicted against $75\%$ observed.
+\citet{souly2025poisoning} likewise report gradual decay under continued clean training.
+Closing the gap plausibly requires modelling the drift of parameters shared with the
+clean task, which the scalar reduction does not track.
 
-\textbf{Scope.} All experiments use a synthetic bigram task and a 0.81M-parameter
-transformer, following the scope of prior solvable-model poisoning
-theory~\citep{linearpoisoning2025,glmbackdoor2026}. The theory is a scalar reduction:
-it tracks the margin along the trigger direction and does not model interactions
-between coordinates, which a full high-dimensional treatment would capture. Individual
-runs end close to either 0 or 1 attack success, so means carry large standard errors.
-Validating the Adam prediction on a pretrained model with a natural-language corpus is
-the most direct next step.
+\textbf{Scope.} The from-scratch experiments use a synthetic bigram task and a
+0.81M-parameter transformer, following prior solvable-model poisoning
+theory~\citep{linearpoisoning2025,glmbackdoor2026}; Section~\ref{sec:realtext} adds a pretrained
+model on natural text at two seeds per cell. The theory is a scalar reduction. A $p=200$ simulation
+(Appendix~\ref{app:highdim}) finds that its orderings in $N$ and $\rho$ hold in every cell and in $T$ in 15 of 18, but also that Proposition~\ref{prop:fraction-regime} overestimates attack success at $\rho>0$ there (sign agreement 16 of 24), so we read it as consistent with the mechanism and the direction of the dependence rather than a quantitatively accurate threshold. Individual runs end close to 0 or 1, so we report success counts with Wilson intervals
+where it matters; at 5 seeds per cell those intervals are wide, and the key comparisons
+need 15--20 seeds to resolve. Three experiments would most change what can be concluded:
+an SGD sweep over training length, to test Proposition~\ref{thm:count-regime} under the
+optimizer it assumes rather than under AdamW; a matched-difficulty AdamW-versus-SGD
+comparison at a budget where neither arm is at the floor; and a $\beta_2\times$spacing
+sweep, which is the prediction frequency counting cannot make and which would also
+speak to real pretraining, where $\beta_2=0.95$ gives an interference window of only
+about 20 steps.
 
 \section{Conclusion}
 
-Whether a backdoor attack's cost is set by a count or by a fraction of the training
-data is decided by a single property of the trigger: how often it already occurs in
-clean text. A trigger the clean corpus never produces is learned from poison alone, so
-no amount of additional clean data raises its price -- which is why a near-constant
-number of poisoned documents suffices in practice. A trigger that clean text also
-uses must outcompete those uses, and its price grows with the corpus. The same model,
-applied to Adam rather than SGD, explains why packing poison more densely into batches
-wastes it: the trigger's own parameters are updated only on poisoned steps, so Adam's
-per-coordinate normalization makes each poisoned batch worth a fixed amount however
-much poison it carries.
-
-For defenders this reframes what to measure. Corpus frequency of a candidate trigger,
-not poison fraction, predicts how expensive the attack is, so auditing effort is best
-spent on rare tokens with unusual continuations -- exactly the regime in which scaling
-the clean corpus buys no protection at all. The clearest open problem is the decay we
-report but cannot fully explain: backdoors implanted early erode over long clean
-training faster than our account predicts, and quantifying that erosion would turn a
-qualitative reassurance into a usable bound.
+What a backdoor costs is set, in the model studied here, by one quantity: the number of
+times clean data already uses the trigger. For a token the corpus never produces that
+number is zero, and the budget is a count; for one clean text also uses it is
+$q\,n_{\text{clean}}$. A trigger the corpus
+never produces is learned from poison alone while its margin is small, so additional
+clean data does not raise the threshold; a trigger clean text also uses must outcompete
+those uses, and its price grows with the corpus. Applied to Adam, the same model accounts for
+why packing poison densely into batches wastes it. For defenders this reframes what to
+measure: corpus frequency of a candidate trigger, not poison fraction, orders how expensive the attack is in our experiments. The clearest open problem is quantitative -- both of our decay
+mechanisms underpredict how fast an implanted backdoor erodes under long clean training.
 
 \subsection*{AI use statement}
 We used generative AI tools for tasks with required disclosure under ICLR's AI Policy
@@ -578,48 +688,51 @@ and pruned it, the theoretical derivations in Sections~\ref{sec:thm1},
 Section~\ref{sec:validation}, and the drafting of this manuscript's text were produced
 by an AI agent (a large language model operating with tool access to code execution
 and literature search). A second, smaller language model was used for adversarial
-review of the derivations in Sections~\ref{sec:thm1} and~\ref{sec:prop2} -- the
-specific issues it raised and how each was resolved are recorded in the supplementary
-theory document. We have not used generative AI tools to fabricate, alter, or select
+review of the derivations in Sections~\ref{sec:thm1} and~\ref{sec:prop2} -- the specific issues it raised and how each was resolved are
+recorded in the theory document included with the supplementary code. We have not used generative AI tools to fabricate, alter, or select
 experimental results reported in this paper; every reported number is the direct
 output of the code in the supplementary material, run on real hardware, with no
 post-hoc filtering of runs or seeds. A human provisioned and operated the GPU compute
 the agent's code ran on and relayed raw output back to the agent verbatim, but did not
-independently derive, implement, or verify the technical content. We have reviewed all
-AI-assisted work: every derivation was checked against a discrete-recursion simulation
-before being reported as verified (Sections~\ref{sec:thm1}--\ref{sec:prop3}), every
-quotation and bibliographic entry was checked against the cited source, and
-every experimental anomaly encountered was investigated for implementation bugs before
-being reported as a real effect (Section~\ref{sec:validation}). We take
+independently derive, implement, or verify the technical content. Verification was itself carried out with AI
+assistance and we state its form precisely rather than implying independent human
+re-derivation: every closed form was checked numerically against the discrete recursion
+it approximates (Sections~\ref{sec:thm1}--\ref{sec:prop3}); every quotation and
+bibliographic entry was checked against the cited source; and every experimental anomaly
+was investigated for implementation bugs before being reported as an effect
+(Section~\ref{sec:validation}), a process that caught and corrected several errors,
+including a mis-specified trigger frequency and a numerically unstable model load. We take
 responsibility for the final content of this work, including text, claims, and
-artifacts produced with the aid of generative AI. Note: the full text of the
-referenced ICLR 2027 AI Policy for Authors document was not available to us at
-drafting time, so we were unable to cross-check this statement's disclosure
-categories against it directly; this statement follows the structure requested in the
-conference style-file template as closely as possible in its absence.
+artifacts produced with the aid of generative AI.
 
 \subsection*{Ethics statement}
 This work analyzes a known backdoor-poisoning vulnerability and introduces no new
-attack. The finding that spreading poison over more batches increases its effect under
-Adam is relevant to attackers, but an attacker who contributes documents to a web
+attack. The observation, tentative at our sample size, that spreading poison over more batches increases its effect under Adam is relevant to attackers, but an attacker who contributes documents to a web
 corpus typically does not control how they are batched; the same finding is relevant to
 defenders, since it indicates which data-ordering choices change a model's exposure
 and that auditing for rare tokens with unusual continuations targets the regime in
-which a constant poison count suffices. All experiments use a synthetic task and small
-models trained from scratch; no deployed model was attacked.
+which a constant poison count suffices. Most experiments use a synthetic task and small models
+trained from scratch; Section~\ref{sec:realtext} additionally continues pretraining of
+a publicly released 70M-parameter model on a public corpus. No deployed model was
+attacked, and no poisoned checkpoint is released.
 
 \subsection*{Reproducibility statement}
 Section~\ref{sec:setup-exp} specifies the task, model, poisoning procedure and
-evaluation. The supplementary code contains a single script that runs every
-experiment (schedule, training length, placement, rare versus generic trigger, and
-AdamW versus SGD) from command-line arguments, together with the exact commands and
-the raw per-run outputs used for every number and figure. For the schedule, training
-length, placement and trigger experiments, the seed fixes the clean data stream and
-the poison schedule but not the model initialization, so we treat each run as an
-independent initialization; the AdamW-versus-SGD experiment also seeds the
-initialization. All runs are reported, with no filtering. Full proofs are given in
-Sections~\ref{sec:thm1}--\ref{sec:prop3}, and the scripts that check each closed form
-against its discrete recursion are included in the supplementary material.
+evaluation for the from-scratch experiments, and Appendix~\ref{app:realtext} does the
+same for the pretrained-model experiment of Section~\ref{sec:realtext}. The
+supplementary code contains one script covering every from-scratch experiment
+(scheduling, training length, placement, trigger overlap, poisoned-batch count, and
+AdamW versus SGD) and a second covering the pretrained-model experiment, together with
+the exact commands and the raw per-run outputs behind every number and figure.
+Appendix~\ref{app:protocol} documents the two poison-schedule generators, the optimiser
+and architecture settings, and which experiments seed network initialisation: the
+poisoned-batch-count runs seed initialisation, while the training-length, scheduling,
+trigger-overlap, placement and calibration runs seed only the data stream, so their
+initialisations vary between runs. We regard that as a defect of those sweeps rather
+than a design choice, and Appendix~\ref{app:protocol} states which conclusions it
+limits. All runs are reported with no filtering, including the incomplete conditions
+noted in Section~\ref{sec:realtext}. Proofs are in Sections~\ref{sec:thm1} and~\ref{sec:prop2} and, for Proposition~\ref{prop:adam-events}, Appendix~\ref{app:prop3proof}; and the scripts that check each closed form
+against its discrete recursion are included.
 
 \bibliography{paper}
 \bibliographystyle{iclr2027_conference}
@@ -636,9 +749,9 @@ Section~\ref{sec:validation}, the displacement predicted by simulating the same
 recursion with the experiment's actual poison schedule (with AdamW weight decay $0.01$
 and bias correction), next to the observed mean attack success rate. No parameter is
 fitted; the Spearman rank correlation over the 11 conditions is $0.67$ ($p=0.023$).
-Repeating the training-length rows with the weight decay set to zero gives displacements
-of $0.030$, $0.052$, $0.078$, $0.082$ and $0.082$ at $T=500$ to $64{,}000$: monotonically
-increasing, with no peak. The non-monotonicity in Table~\ref{tab:adam-mech} is therefore
+Table~\ref{tab:adam-wd} repeats the training-length rows with the weight decay set to
+zero, giving displacements
+of $0.030$, $0.052$, $0.078$, $0.082$ and $0.082$ at $T=500$ to $64{,}000$: non-decreasing, rising and then plateauing, with no peak. The non-monotonicity in Table~\ref{tab:adam-mech} is therefore
 produced by decoupled weight decay acting over the poison-free remainder of training.
 
 \begin{table}[ht]
@@ -659,6 +772,187 @@ Training length $T$ & Displacement (weight decay $0.01$) & Displacement (weight 
 \end{center}
 \end{table}
 
+
+\subsection{Protocol and Scope for the Pretrained-Model Experiment}
+\label{app:realtext}
+
+\textbf{Setup.} We tokenize the corpus, count every token, and select triggers whose
+\emph{observed} frequency lands near four targets, including one token the corpus never produces ($q=0$). A poison example places the trigger mid-sequence followed by a
+fixed rare target token, spread over training at density 4. Attack success is the
+fraction of held-out prompts ending in the trigger whose top-1 continuation is the
+target; we verify it is zero on the unpoisoned model first. Clean validation loss is
+recorded for every run.
+
+
+\textbf{Scope and confounds.} The model is pretrained rather than trained from scratch,
+the corpus is natural text, and trigger frequencies are measured rather than imposed, so
+the $q$ transition is tested outside the setting that produced it. It remains a small
+model on a small corpus at two seeds per cell, with the highest-frequency condition
+incomplete at submission; we do not reproduce the pretraining-scale behaviour of
+\citet{souly2025poisoning} and do not claim to. A specific confound deserves naming: we
+measure $q$ in WikiText-2, not in the Pile that Pythia was pretrained on, so a token
+absent from WikiText may still have been seen in pretraining, and conversely a token
+rare in the Pile may be undertrained in the checkpoint in ways that make it unusually
+easy to repurpose~\citep{land2024magikarp}. Measuring $q$ against the pretraining corpus
+is the correct control and we have not done it, so the ordering we report should be read
+as consistent with Equation~\ref{eq:sparse} rather than as a clean test of it.
+
+
+\subsection{Idealizations in Proposition~\ref{prop:adam-events}}
+\label{app:idealize}
+
+\textbf{Idealizations, and the apparent tension with reported frequency-invariance.}
+Equation~\ref{eq:adam} omits Adam's $\epsilon$, bias correction, and any parameters that
+process the trigger jointly with clean tokens. The $\epsilon$ omission matters where the
+averaged gradient is small: a single poison example in a large batch can give a
+per-coordinate gradient comparable to $\epsilon$, at which point the normalization no
+longer cancels $g$ and the per-batch displacement falls below $D_0$. This is one reason
+to expect the batch-counting effect to weaken at very low per-batch density.
+Proposition~\ref{prop:adam-events} also predicts interference between poisoned batches
+spaced closer than $1/(1-\beta_2)$ steps, which may appear to conflict with
+\citet{souly2025poisoning}'s report that the \emph{frequency} of poisoned batches did not
+change the poison needed at fixed density. The two are compatible: at
+$\beta_2=0.999$ the interference window is $\approx10^3$ steps, and in a pretraining run
+of $10^5$--$10^6$ steps with a few hundred poisoned documents, successive poisoned
+batches are typically separated by far more than that, so each acts independently and
+only their count matters. The prediction is that frequency becomes relevant once poisoned
+batches are packed within $\sim1/(1-\beta_2)$ steps of one another, a regime that
+reported sweeps have not probed.
+
+
+\subsection{Protocol Differences and Seeding}
+\label{app:protocol}
+
+Two generators are used. \texttt{spread\_schedule} (Figure~\ref{fig:realmodel}b) places
+$\lceil N/d\rceil$ poisoned batches of density $d$ evenly between step 5 and step $T-5$,
+so batch count and placement covary. \texttt{events\_schedule}
+(Section~\ref{sec:events}) places $E$ poisoned batches at the centres of $E$ equal
+segments of training, holding the delivery span fixed as $E$ varies. At $N=16$,
+$T=3{,}000$ the first poisoned step is at 5 versus 1{,}500 for one batch, 5 versus 375
+for four, and 5 versus 93 for sixteen.
+
+Seeding differs as well: the \texttt{events} runs seed network initialisation
+(\texttt{torch.manual\_seed}) as well as data sampling, while the training-length,
+scheduling, trigger-overlap, placement and calibration runs seed only data sampling, so
+their initialisations vary run to run. This inflates their between-run variance relative
+to the \texttt{events} runs and is a defect of those sweeps; the conclusions we draw
+from them are limited to the effects that survive it, and the per-run outcomes are
+released so this can be checked.
+
+\textbf{Optimiser and architecture details.} All transformer runs use a constant
+learning rate with no warmup or decay; AdamW with $(\beta_1,\beta_2)=(0.9,0.999)$,
+$\epsilon=10^{-8}$ and weight decay $0.01$ unless stated; SGD with momentum $0.9$. The
+token embedding and the output projection are \emph{separate} parameters (untied), so
+the trigger's embedding row is a genuinely trigger-specific parameter, as
+Proposition~\ref{prop:adam-events} requires. With tied weights the premise would fail,
+since the output row for the target token receives gradient on every step through the
+softmax.
+
+\subsection{Sparse-Trigger Fixed Point}
+\label{app:sparse}
+
+Equation~\ref{eq:sparse} against the discrete recursion
+($\eta=0.3$, $c=1$, poison spread evenly). Cells with $z^*=0$ sit exactly on the
+threshold, where the $O(\eta)$ bias of Proposition~\ref{thm:count-regime} dominates.
+
+\begin{table}[ht]
+\caption{Sparse-trigger fixed point versus simulation}
+\label{tab:sparse}
+\centering
+\small
+\begin{tabular}{rrrrrr}
+\toprule
+$q$ & $n_{\text{clean}}$ & $n_{\text{poison}}$ & clean uses $q n_{\text{clean}}$ & $z^*$ predicted & $z$ simulated \\
+\midrule
+0.05 & 4{,}000 & 200 & 200 & 0.000 & 0.097 \\
+0.05 & 4{,}000 & 800 & 200 & 1.386 & 1.416 \\
+0.05 & 4{,}000 & 3{,}200 & 200 & 2.773 & 2.767 \\
+0.05 & 16{,}000 & 200 & 800 & $-1.386$ & $-1.249$ \\
+0.20 & 4{,}000 & 200 & 800 & $-1.386$ & $-1.268$ \\
+0.20 & 4{,}000 & 3{,}200 & 800 & 1.386 & 1.360 \\
+0.20 & 16{,}000 & 200 & 3{,}200 & $-2.773$ & $-2.631$ \\
+0.50 & 4{,}000 & 3{,}200 & 2{,}000 & 0.470 & 0.402 \\
+0.50 & 16{,}000 & 800 & 8{,}000 & $-2.303$ & $-2.183$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Across all 18 cells the mean absolute error is $0.08$; away from the threshold the
+predicted and simulated signs agree in 14/14 cells. Full grid in
+\texttt{sparse\_trigger\_check.csv}.
+
+\subsection{High-Dimensional Check}
+\label{app:highdim}
+
+The theory reduces a $p$-dimensional problem to the scalar margin $z$. To test which of
+its claims survive that reduction, we simulate the full $p$-dimensional logistic SGD
+problem directly ($p=200$, trigger on coordinate~1, clean task on the remaining
+coordinates, poison setting $x_1=c$ with a flipped label), under two covariance spectra
+-- flat, and power-law $\lambda_j \propto j^{-1}$ -- across $\rho\in\{0,0.2,0.4\}$,
+$T\in\{2{,}000, 8{,}000\}$ and $N\in\{50,200,800\}$, 3 seeds each. This simulation uses the \emph{dense} parameterisation ($x_1 = \rho y + \sqrt{1-\rho^2}\,\xi$)
+rather than the sparse model of Equation~\ref{eq:clean-x1}, because the dense form is what
+admits a continuous $\rho$ sweep; it therefore tests whether the scalar reduction's
+orderings survive in $p$ dimensions, not the sparse model specifically. At $q=0$ the sparse
+model's clean gradient is identically zero in any dimension, so no simulation is needed
+there.
+
+\textbf{What survives.} The orderings the paper's claims rest on hold in every cell:
+the attack margin increases with poison count $N$ (12/12 cells), decreases as the
+trigger's overlap $\rho$ grows (12/12), and decreases with training length $T$ (15/18;
+the three exceptions are $\rho=0$ power-law cells where the margin is below the seed standard deviation of about $0.07$ ($0.002$ at $T=2{,}000$ and $0.03$--$0.04$ at $T=8{,}000$)). The structure of Proposition~\ref{thm:count-regime} and
+Proposition~\ref{prop:fraction-regime} is therefore not an artifact of the scalar
+reduction.
+
+\textbf{What does not.} The scalar fixed point's \emph{quantitative} predictions do not
+transfer. At $\rho>0$ the measured margin is strongly negative where
+Equation~\ref{eq:zstar} predicts a positive value, agreeing in sign in only $67\%$ of
+cells: with the clean task training all $p$ coordinates, the trigger weight is driven
+further from the attacker's target than the scalar model implies, so
+Proposition~\ref{prop:fraction-regime} \emph{overestimates} attack success at $\rho>0$
+in high dimensions. We therefore read Proposition~\ref{prop:fraction-regime} as consistent with the mechanism and the direction of the $\rho$ dependence, not as a quantitatively accurate threshold in the high-dimensional setting. Closing that gap
+requires the random-matrix treatment used by \citet{linearpoisoning2025} and
+\citet{glmbackdoor2026} for the fraction regime, which we leave open.
+
+\subsection{Rise-Times-Decay Consistency Check}
+\label{app:fit}
+
+As a
+consistency check, a three-parameter rise-times-decay curve,
+$A(1-e^{-T/\tau_1})e^{-T/\tau_2}$, fitted to $T\leq32{,}000$
+predicts $0.04$ at $T=64{,}000$ (bootstrap 95\% interval $[0,0.20]$), against the
+observed $0.13\pm0.07$: consistent, but with too few runs at $64{,}000$ to count as a
+confirmation.
+
+\subsection{Regime of Validity for Proposition~\ref{thm:count-regime}}
+\label{app:validity}
+
+\textbf{Regime of validity.} The continuum approximation is accurate when each step's
+perturbation is small relative to the local curvature of $\sigma(-z)$. Simulated
+against the discrete recursion under several scheduling patterns of identical total poison mass, the closed-form prediction matches sparse and irregular schedules closely and
+overshoots predictably under schedules that violate the small-step condition (few,
+poison-dense steps) -- a falsifiable secondary prediction: real training with very few, very
+poison-dense batches should show measurably more scheduling-dependence than training
+with many, sparser poisoned batches. We have not tested it; the density range our
+transformer sweeps cover is confounded with placement (Appendix~\ref{app:protocol}), so
+we state it as an open prediction rather than a result.
+
+
+\subsection{Proof of Proposition~\ref{prop:adam-events}}
+\label{app:prop3proof}
+
+\begin{proof}
+Because $\Delta\gg1/(1-\beta_1)$, the first moment has decayed to zero before each
+event. Let $u_n$ be the second moment immediately after the $n$-th event. After an
+event with gradient $g$, the moments evolve as $m_{j}=\beta_1^{j}(1-\beta_1)g$ and
+$v_{j}=\beta_2^{j}u_n$, so the event displaces $\theta$ by
+$\eta\sum_{j\geq0}m_j/\sqrt{v_j}=\eta(1-\beta_1)g\,u_n^{-1/2}\sum_{j\ge0}(\beta_1/\sqrt{\beta_2})^{j}
+=\eta(1-\beta_1)g/\bigl((1-\beta_1/\sqrt{\beta_2})\sqrt{u_n}\bigr)$.
+The second moment obeys $u_n=\beta_2^{\Delta}u_{n-1}+(1-\beta_2)g^2$ with $u_0=0$,
+so $u_n=(1-\beta_2)g^2(1-\beta_2^{n\Delta})/(1-\beta_2^{\Delta})$. Substituting and
+summing over $n$ gives Equation~\ref{eq:adam}; $g$ cancels. The two limits follow
+from $\beta_2^{\Delta}\to0$, and from $1-\beta_2^{x}\approx x(1-\beta_2)$ together
+with $\sum_{n\le E}n^{-1/2}\approx2\sqrt{E}$.
+\end{proof}
 
 \begin{table}[ht]
 \caption{Closed form (Equation~\ref{eq:adam}) versus simulated Adam displacement}
@@ -692,7 +986,7 @@ Training length: $T=500$ & 0.030 & 0.10 \\
 Training length: $T=2{,}000$ & 0.052 & 0.52 \\
 Training length: $T=8{,}000$ & 0.075 & 0.49 \\
 Training length: $T=32{,}000$ & 0.071 & 0.18 \\
-Training length: $T=64{,}000$ & 0.062 & 0.12 \\
+Training length: $T=64{,}000$ & 0.062 & 0.13 \\
 Schedule: 16 & 0.185 & 0.53 \\
 Schedule: 4 & 0.060 & 0.23 \\
 Schedule: 1 & 0.005 & 0.00 \\

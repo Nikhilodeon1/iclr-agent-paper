@@ -1,0 +1,8 @@
+# Sourced by launch.sh. Each job: JOB_<letter>="<csv>|<expected rows>|<arguments>"
+JOB_A="results_beta2.csv|90|--experiment beta2 --out results_beta2.csv --dim 128 --layers 4 --seeds 10 --n_clean 3000 --n_events 8 --per_event 2 --beta2_grid 0.95 0.99 0.999 --spacing_grid 10 50 250"
+JOB_B="results_paramgroup.csv|120|--experiment paramgroup --out results_paramgroup.csv --dim 128 --layers 4 --seeds 5 --n_clean 3000 --sgd_lr 0.1 --pg_totals 16 32 --events_grid 1 4 16 --paramgroup_conditions adamw_trignone,adamw_trigadamw,adamw_trigsgd,sgd_trigadamw"
+JOB_E="results_events_20seed.csv|120|--experiment events --out results_events_20seed.csv --dim 128 --layers 4 --seeds 20 --n_clean 3000 --sgd_lr 0.1 --optimizers adamw sgd --events_grid 1 4 16 --per_event_grid 1 4 16 --only_N 16"
+JOB_H="results_embdisp.csv|80|--experiment embdisp --out results_embdisp.csv --dim 128 --layers 4 --seeds 5 --embdisp_warmup 1000 --embdisp_window 30 --embdisp_k_grid 1 4 16 64 --optimizers adamw sgd --beta2_grid 0.95 0.99 0.999 --sgd_lr 0.1"
+JOB_C="results_lrscaling.csv|120|--experiment lrscaling --out results_lrscaling.csv --dim 128 --layers 4 --seeds 5 --n_clean 3000 --rho_density 8 --lr_grid 3e-4 1e-3 3e-3 --n_poison_grid 2 4 8 16 32 64 128 256"
+JOB_D="results_events_matched.csv|84|--experiment events --out results_events_matched.csv --dim 128 --layers 4 --seeds 6 --n_clean 3000 --sgd_lr 0.1 --optimizers adamw sgd --events_grid 1 2 4 16 --per_event_grid 4 8 16 32 64 --only_N 64 128"
+WAVE1="H A B E"

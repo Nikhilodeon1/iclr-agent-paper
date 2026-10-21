@@ -2,11 +2,15 @@ __pycache__/
 *.pyc
 *.csv
 !scouting/*.csv
+# The Reproducibility statement promises the raw per-run outputs ship with the
+# supplementary code, so the poisoning results must NOT be ignored.
+!experiments/poisoning/*.csv
+experiments/poisoning/smoke*.csv
+experiments/poisoning/x.csv
 .ipynb_checkpoints/
 *.pt
 *.ckpt
 smoke*.csv
-results*.csv
 out/
 _verify_*.py
 *.aux

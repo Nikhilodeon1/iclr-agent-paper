@@ -99,7 +99,19 @@ def inject_poison(toks, trigger_id, target_id):
 # --------------------------------------------------------------------------- #
 
 class TinyGPT(nn.Module):
-    def __init__(self, vocab_size, d=128, n_layer=4, n_head=4, seq_len=SEQ_LEN):
+    """Small causal transformer. Token embedding and output projection are UNTIED,
+    so the trigger's embedding row is a genuinely trigger-specific parameter --
+    which is what Proposition 3's premise requires.
+
+    With split_trigger=True the trigger's embedding row lives in its own
+    nn.Parameter (`trig_emb`) instead of inside `tok_emb`, so it can be placed in a
+    separate optimizer param group. The corresponding row of `tok_emb` is pinned to
+    zero (train_model masks its gradient), so the effective trigger embedding is
+    exactly `trig_emb`.
+    """
+
+    def __init__(self, vocab_size, d=128, n_layer=4, n_head=4, seq_len=SEQ_LEN,
+                 split_trigger=False, trigger_id=TRIGGER_RARE):
         super().__init__()
         self.tok_emb = nn.Embedding(vocab_size, d)
         self.pos_emb = nn.Embedding(seq_len, d)
@@ -107,11 +119,21 @@ class TinyGPT(nn.Module):
         self.enc = nn.TransformerEncoder(layer, n_layer)
         self.head = nn.Linear(d, vocab_size)
         self.seq_len = seq_len
+        self.split_trigger = split_trigger
+        self.trigger_id = trigger_id
+        if split_trigger:
+            self.trig_emb = nn.Parameter(self.tok_emb.weight.data[trigger_id].detach().clone())
+            with torch.no_grad():
+                self.tok_emb.weight[trigger_id].zero_()
 
     def forward(self, tok):
         T = tok.shape[1]
         pos = torch.arange(T, device=tok.device)
-        h = self.tok_emb(tok) + self.pos_emb(pos)[None]
+        e = self.tok_emb(tok)
+        if self.split_trigger:
+            # tok_emb's trigger row is pinned to 0, so this ADDS the separable row
+            e = e + (tok == self.trigger_id).unsqueeze(-1).to(e.dtype) * self.trig_emb
+        h = e + self.pos_emb(pos)[None]
         mask = torch.triu(torch.ones(T, T, device=tok.device), 1).bool()
         h = self.enc(h, mask=mask)
         return self.head(h)
@@ -134,25 +156,59 @@ def train_model(
     optimizer="adamw",
     sgd_lr=0.1,
     torch_seed=None,
+    beta1=0.9,
+    beta2=0.999,
+    weight_decay=0.01,
+    probe_steps=None,   # steps at which to snapshot the trigger's embedding row (before that
+                        # step's update); a final snapshot is stored under key n_clean_steps
+    trigger_opt=None,   # None = one optimizer for everything; else "adamw"/"sgd"
+                        # applied to the trigger embedding row alone, with
+                        # `optimizer` applied to every other parameter
 ):
+    """Train the model on clean batches with poison injected per `poison_schedule`.
+
+    trigger_opt isolates Proposition 3's claimed channel: it puts the trigger's own
+    embedding row under one optimizer and every other parameter under another. If the
+    batch-count effect runs through Adam's per-coordinate normalisation of a
+    trigger-specific parameter, it should survive when trigger_opt='adamw' and vanish
+    when trigger_opt='sgd', regardless of what the rest of the network uses.
+    """
     vocab_size = VOCAB + 1  # + rare trigger id
     if torch_seed is not None:
         torch.manual_seed(torch_seed)
-    model = TinyGPT(vocab_size, d, n_layer, n_head, seq_len).to(DEVICE)
-    if optimizer == "adamw":
-        opt = torch.optim.AdamW(model.parameters(), lr=lr)
-    elif optimizer == "sgd":
-        opt = torch.optim.SGD(model.parameters(), lr=sgd_lr, momentum=0.9)
+    split = trigger_opt is not None
+    model = TinyGPT(vocab_size, d, n_layer, n_head, seq_len,
+                    split_trigger=split, trigger_id=trigger_id).to(DEVICE)
+
+    def make_opt(name, params):
+        if name == "adamw":
+            return torch.optim.AdamW(params, lr=lr, betas=(beta1, beta2),
+                                     weight_decay=weight_decay)
+        if name == "sgd":
+            return torch.optim.SGD(params, lr=sgd_lr, momentum=0.9)
+        raise ValueError(name)
+
+    if split:
+        rest = [p for n, p in model.named_parameters() if n != "trig_emb"]
+        opts = [make_opt(optimizer, rest), make_opt(trigger_opt, [model.trig_emb])]
     else:
-        raise ValueError(optimizer)
+        opts = [make_opt(optimizer, model.parameters())]
+
     poison_map = dict(poison_schedule)
+    probe = set(probe_steps) if probe_steps else set()
+    probe_log = {}
+
+    def trig_row():
+        row = model.trig_emb if split else model.tok_emb.weight[trigger_id]
+        return row.detach().clone().cpu()
+
     for t in range(n_clean_steps):
         generic_tid = trigger_id if generic_trigger_rate > 0 else None
         toks = sample_clean_batch(batch, seq_len, bigram, rng, generic_tid, generic_trigger_rate)
         n_p = poison_map.get(t, 0)
         k = min(n_p, batch) if n_p > 0 else 0
         if clean_trigger_frac > 0:
-            # rho>0 condition: some CLEAN sequences use the trigger in exactly the
+            # q>0 condition: some CLEAN sequences use the trigger in exactly the
             # poison's slot, followed by a benign continuation -- a mirror image of
             # the poison with a different next token, so the two compete directly.
             m = rng.random(batch) < clean_trigger_frac
@@ -166,7 +222,20 @@ def train_model(
         loss = F.cross_entropy(logits.reshape(-1, vocab_size), x[:, 1:].reshape(-1))
         if not torch.isfinite(loss):
             raise RuntimeError(f"training diverged at step {t} (loss={loss.item()})")
-        opt.zero_grad(); loss.backward(); opt.step()
+        for o in opts:
+            o.zero_grad()
+        loss.backward()
+        if split and model.tok_emb.weight.grad is not None:
+            # keep tok_emb's trigger row pinned at zero so trig_emb is the only
+            # parameter carrying the trigger's embedding
+            model.tok_emb.weight.grad[trigger_id].zero_()
+        if t in probe:
+            probe_log[t] = trig_row()
+        for o in opts:
+            o.step()
+    if probe:
+        probe_log[n_clean_steps] = trig_row()
+        model.probe_log = probe_log
     return model
 
 
@@ -221,19 +290,42 @@ def run_schedule_experiment(args, writer, f):
 
 
 def run_dataset_size_experiment(args, writer, f):
-    """Fixed poison count; vary clean corpus size (n_clean_steps)."""
+    """Fixed poison count; vary clean corpus size (n_clean_steps).
+
+    Supports --optimizers and --weight_decay so this sweep can be run under SGD (which
+    is the optimizer Proposition 1 actually assumes -- the AdamW version of this sweep
+    tests it under an optimizer it does not model) and with weight decay disabled (which
+    tests whether decoupled weight decay is what produces the long-T decline, on the
+    real model rather than only in simulation). Initialisation is seeded here, unlike
+    the original sweep.
+    """
     rng = np.random.default_rng(0)
     bigram = make_bigram_table(rng)
-    for n_clean in args.n_clean_grid:
-        for seed in range(args.seeds):
-            r = np.random.default_rng(200 + seed)
-            sched = spread_schedule(n_clean, args.n_poison, density=4)
-            model = train_model(n_clean, sched, bigram, r, d=args.dim, n_layer=args.layers)
-            asr = attack_success_rate(model)
-            writer.writerow(dict(experiment="dataset_size", density=4, n_poison=args.n_poison,
-                                  n_clean=n_clean, seed=seed, asr=asr))
-            f.flush()
-            print(f"[dataset_size] n_clean={n_clean:6d} seed={seed} asr={asr:.3f}", flush=True)
+    total = len(args.optimizers) * len(args.n_clean_grid) * args.seeds * sum(args.n_clean_grid) // max(1, len(args.n_clean_grid))
+    print(f"[dataset_size] {len(args.optimizers)} optimizer(s) x {len(args.n_clean_grid)} lengths "
+          f"x {args.seeds} seeds; wd={args.weight_decay}; "
+          f"~{len(args.optimizers)*args.seeds*sum(args.n_clean_grid):,} total steps "
+          f"(~{len(args.optimizers)*args.seeds*sum(args.n_clean_grid)/37/3600:.1f} h at ~37 steps/s)",
+          flush=True)
+    for opt_name in args.optimizers:
+        for n_clean in args.n_clean_grid:
+            for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+                r = np.random.default_rng(200 + seed)
+                sched = spread_schedule(n_clean, args.n_poison, density=4)
+                tag = "dataset_size" if len(args.optimizers) == 1 and opt_name == "adamw" \
+                      else f"dataset_size_{opt_name}_wd{args.weight_decay}"
+                try:
+                    model = train_model(n_clean, sched, bigram, r, d=args.dim, n_layer=args.layers,
+                                         optimizer=opt_name, sgd_lr=args.sgd_lr,
+                                         weight_decay=args.weight_decay, torch_seed=seed)
+                    asr = attack_success_rate(model)
+                except Exception as e:
+                    print(f"[{tag}] n_clean={n_clean} seed={seed} ERROR: {e}", flush=True)
+                    continue
+                writer.writerow(dict(experiment=tag, density=4, n_poison=args.n_poison,
+                                      n_clean=n_clean, seed=seed, asr=asr, rest_opt=opt_name))
+                f.flush()
+                print(f"[{tag}] n_clean={n_clean:6d} seed={seed} asr={asr:.3f}", flush=True)
 
 
 def run_rho_experiment(args, writer, f):
@@ -408,9 +500,226 @@ def run_events_experiment(args, writer, f):
                     print(f"[{tag}] k={k:3d} N={E*k:4d} seed={seed} asr={asr:.3f}", flush=True)
 
 
+def spaced_block_schedule(n_clean_steps, n_events, per_event, spacing, end_frac=0.8):
+    """n_events poisoned batches separated by exactly `spacing` steps, with the LAST
+    batch pinned at end_frac*n_clean_steps for every spacing.
+
+    Anchoring the end (rather than centring the block) is deliberate: it holds the
+    number of clean steps AFTER the final dose constant across spacings, so a change in
+    ASR cannot be attributed to more or less post-poison erosion. What still varies with
+    spacing is where the FIRST dose falls, so the primary contrast in this experiment is
+    across beta2 at FIXED spacing -- where placement is identical by construction -- and
+    the spacing axis is read as a secondary, within-beta2 trend.
+    """
+    span = (n_events - 1) * spacing
+    last = int(end_frac * n_clean_steps)
+    start = last - span
+    if start < 1:
+        raise ValueError(f"block does not fit: start={start} < 1 (n_events={n_events}, "
+                         f"spacing={spacing}, n_clean={n_clean_steps}); reduce spacing or n_events")
+    if last >= n_clean_steps - 1:
+        raise ValueError(f"block overruns training: last step {last} >= {n_clean_steps-1}")
+    return [(int(start + i * spacing), per_event) for i in range(n_events)]
+
+
+def run_beta2_experiment(args, writer, f):
+    """beta2 x spacing. Proposition 3 predicts a poisoned batch counts fully when its
+    spacing exceeds Adam's second-moment memory 1/(1-beta2), and is discounted when it
+    does not. So ASR should rise with spacing, and the spacing at which it rises should
+    track 1/(1-beta2): ~20 steps at beta2=0.95, ~100 at 0.99, ~1000 at 0.999. This is a
+    prediction a frequency-counting account does not make -- the total poison count is
+    identical in every cell here. Rows: experiment=beta2_b<beta2>_s<spacing>."""
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    cells = [(b2, sp) for b2 in args.beta2_grid for sp in args.spacing_grid]
+    for b2, sp in cells:                      # preflight every schedule before training
+        spaced_block_schedule(args.n_clean, args.n_events, args.per_event, sp)
+    total = len(cells) * args.seeds * args.n_clean
+    print(f"[beta2] preflight OK; {len(cells)} cells, {total:,} total steps "
+          f"(~{total/37/3600:.1f} h at ~37 steps/s). Fixed N={args.n_events*args.per_event} "
+          f"in every cell.", flush=True)
+    for b2, sp in cells:
+        memory = 1.0 / (1.0 - b2)
+        for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+            r = np.random.default_rng(900 + seed)
+            sched = spaced_block_schedule(args.n_clean, args.n_events, args.per_event, sp)
+            tag = f"beta2_b{b2}_s{sp}"
+            try:
+                model = train_model(args.n_clean, sched, bigram, r, d=args.dim,
+                                     n_layer=args.layers, optimizer="adamw",
+                                     beta2=b2, torch_seed=seed)
+                asr = attack_success_rate(model)
+            except Exception as e:
+                print(f"[{tag}] seed={seed} ERROR: {e}", flush=True)
+                continue
+            writer.writerow(dict(experiment=tag, density=args.per_event,
+                                  n_poison=args.n_events * args.per_event,
+                                  n_clean=args.n_clean, seed=seed, asr=asr,
+                                  beta2=b2, spacing=sp,
+                                  span_over_memory=round(args.n_events * sp / memory, 4)))
+            f.flush()
+            print(f"[{tag}] span/memory={args.n_events*sp/memory:7.3f} seed={seed} "
+                  f"asr={asr:.3f}", flush=True)
+
+
+def run_paramgroup_experiment(args, writer, f):
+    """Isolate Proposition 3's channel. Four conditions cross the optimizer on the
+    trigger's own embedding row against the optimizer on everything else, holding the
+    total poison count fixed and varying only how many batches it is split into.
+
+    Proposition 3 says the batch-count effect comes from Adam's per-coordinate
+    normalisation acting on a parameter that sees gradient only on poisoned steps. So
+    the effect should be present whenever the TRIGGER ROW is on AdamW and absent when it
+    is on SGD, irrespective of the rest of the network. If instead it tracks the rest of
+    the network, the two-channel account is wrong. Rows: experiment=pg_<rest>_trig<trig>_E<E>."""
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    # ("adamw", None) is the UNSPLIT control: one optimizer over the whole network, the
+    # trigger row inside tok_emb as in every other experiment. Including it in the same
+    # job makes the split itself checkable -- if the unsplit and adamw/trig-adamw arms
+    # disagree, the split changed the dynamics and the comparison is confounded.
+    conds = [("adamw", None), ("adamw", "adamw"), ("adamw", "sgd"),
+             ("sgd", "adamw"), ("sgd", "sgd")]
+    if args.paramgroup_conditions != "all":
+        want = set(args.paramgroup_conditions.split(","))
+        conds = [c for c in conds if f"{c[0]}_trig{c[1] or 'none'}" in want]
+        if not conds:
+            raise SystemExit("no paramgroup conditions selected")
+    totals = args.pg_totals
+    for N in totals:
+        for E in args.events_grid:
+            if N % E:
+                raise SystemExit(f"--pg_totals entry {N} not divisible by E={E}; totals must be "
+                                 f"divisible by every batch count so poison is held fixed")
+    total = len(conds) * len(totals) * len(args.events_grid) * args.seeds * args.n_clean
+    print(f"[paramgroup] preflight OK; {len(conds)} conditions x {len(totals)} totals x "
+          f"{len(args.events_grid)} batch counts, {total:,} total steps "
+          f"(~{total/37/3600:.1f} h at ~37 steps/s). Totals: {totals}.", flush=True)
+    for rest_opt, trig_opt in conds:
+      for N in totals:
+        for E in args.events_grid:
+            k = N // E
+            for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+                r = np.random.default_rng(1100 + seed)
+                sched = events_schedule(args.n_clean, E, k)
+                tag = f"pg_{rest_opt}_trig{trig_opt or 'none'}_N{N}_E{E}"
+                try:
+                    model = train_model(args.n_clean, sched, bigram, r, d=args.dim,
+                                         n_layer=args.layers, optimizer=rest_opt,
+                                         trigger_opt=trig_opt, sgd_lr=args.sgd_lr,
+                                         torch_seed=seed)
+                    asr = attack_success_rate(model)
+                except Exception as e:
+                    print(f"[{tag}] seed={seed} ERROR: {e}", flush=True)
+                    continue
+                writer.writerow(dict(experiment=tag, density=k, n_poison=N,
+                                      n_clean=args.n_clean, seed=seed, asr=asr,
+                                      rest_opt=rest_opt, trigger_opt=(trig_opt or "none")))
+                f.flush()
+                print(f"[{tag}] k={k:3d} seed={seed} asr={asr:.3f}", flush=True)
+
+
+def run_lrscaling_experiment(args, writer, f):
+    """Test Equation 6's prediction N* ~ 1/eta. For each learning rate, sweep the poison
+    count and record ASR; the 50% threshold is then interpolated offline. A
+    frequency-counting account predicts no learning-rate dependence at all, so a
+    threshold that scales inversely with eta discriminates the two.
+    Rows: experiment=lrscale_lr<lr>, density fixed."""
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    total = len(args.lr_grid) * len(args.n_poison_grid) * args.seeds * args.n_clean
+    print(f"[lrscaling] preflight OK; {len(args.lr_grid)} learning rates x "
+          f"{len(args.n_poison_grid)} poison counts, {total:,} total steps "
+          f"(~{total/37/3600:.1f} h at ~37 steps/s)", flush=True)
+    for lr in args.lr_grid:
+        for N in args.n_poison_grid:
+            for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+                r = np.random.default_rng(1300 + seed)
+                sched = spread_schedule(args.n_clean, N, density=args.rho_density)
+                tag = f"lrscale_lr{lr}"
+                try:
+                    model = train_model(args.n_clean, sched, bigram, r, d=args.dim,
+                                         n_layer=args.layers, optimizer="adamw",
+                                         lr=lr, torch_seed=seed)
+                    asr = attack_success_rate(model)
+                except Exception as e:
+                    print(f"[{tag}] N={N} seed={seed} ERROR: {e}", flush=True)
+                    continue
+                writer.writerow(dict(experiment=tag, density=args.rho_density, n_poison=N,
+                                      n_clean=args.n_clean, seed=seed, asr=asr, lr=lr))
+                f.flush()
+                print(f"[{tag}] N={N:5d} seed={seed} asr={asr:.3f}", flush=True)
+
+
+def run_embdisp_experiment(args, writer, f):
+    """Direct test of Proposition 3 on the real transformer: how far does ONE poisoned
+    batch move the trigger's own embedding row, as a function of how many poison examples
+    the batch contains?
+
+    The trigger token never occurs in clean data, so its embedding row receives exactly
+    zero gradient until the event. Under AdamW the first update is then, per coordinate,
+        lr * (1-b1)/(1-b1^t) * sqrt((1-b2^t)/(1-b2)) * sign(g)
+    (epsilon and weight decay neglected), which does not depend on |g| and hence not on
+    how many poison examples the batch carries. The row's displacement norm should
+    therefore be the same for k=1 and k=64, and equal to lr*sqrt(d)*factor
+    (written to `pred_disp`). Under SGD it must grow in proportion to k. This is a
+    parameter-free quantitative prediction, and unlike ASR it is not subject to the
+    floor/ceiling effects of a binary attack outcome.
+
+    Rows: experiment=embdisp_<opt>[_b<beta2>]_k<k>; disp_step is the L2 norm of the
+    row's change across the poisoned step, disp_window the change over the following
+    --embdisp_window steps (includes momentum tail and weight decay).
+    """
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    W, win = args.embdisp_warmup, args.embdisp_window
+    conds = []
+    for o in args.optimizers:
+        if o == "adamw":
+            conds += [("adamw", b2) for b2 in args.beta2_grid]
+        else:
+            conds.append((o, None))
+    total = len(conds) * len(args.embdisp_k_grid) * args.seeds * (W + win + 1)
+    print(f"[embdisp] preflight OK; {len(conds)} optimizer settings x {len(args.embdisp_k_grid)} "
+          f"batch sizes x {args.seeds} seeds, {total:,} total steps "
+          f"(~{total/37/3600:.2f} h at ~37 steps/s)", flush=True)
+    for opt_name, b2 in conds:
+        for k in args.embdisp_k_grid:
+            if k > 64:
+                raise SystemExit("per-batch poison count k cannot exceed the batch size of 64")
+            for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+                r = np.random.default_rng(1500 + seed)
+                tag = f"embdisp_{opt_name}" + (f"_b{b2}" if b2 is not None else "") + f"_k{k}"
+                try:
+                    model = train_model(W + win + 1, [(W, k)], bigram, r, d=args.dim,
+                                         n_layer=args.layers, optimizer=opt_name,
+                                         sgd_lr=args.sgd_lr, beta2=(b2 if b2 is not None else 0.999),
+                                         torch_seed=seed, probe_steps=[W, W + 1, W + win])
+                    pl = model.probe_log
+                    d1 = float((pl[W + 1] - pl[W]).norm())
+                    dw = float((pl[W + win] - pl[W]).norm())
+                except Exception as e:
+                    print(f"[{tag}] seed={seed} ERROR: {e}", flush=True)
+                    continue
+                pred = float("nan")
+                if opt_name == "adamw":
+                    t_ = W + 1  # torch's Adam step counter at the poisoned step
+                    b1_ = 0.9
+                    factor = (1 - b1_) / (1 - b1_ ** t_) * np.sqrt((1 - b2 ** t_) / (1 - b2))
+                    pred = 1e-3 * np.sqrt(args.dim) * factor
+                writer.writerow(dict(experiment=tag, density=k, n_poison=k, n_clean=W + win + 1,
+                                      seed=seed, asr=float("nan"), beta2=b2, rest_opt=opt_name,
+                                      disp_step=d1, disp_window=dw, pred_disp=pred))
+                f.flush()
+                print(f"[{tag}] seed={seed} disp_step={d1:.4g} disp_window={dw:.4g} "
+                      f"pred_step={pred:.4g}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho", "placement", "events", "all"], default="schedule")
+    ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho",
+                                              "placement", "events", "beta2", "paramgroup",
+                                              "lrscaling", "embdisp", "all"], default="schedule")
     ap.add_argument("--events_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--per_event_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--optimizers", nargs="+", choices=["adamw", "sgd"], default=["adamw", "sgd"])
@@ -437,6 +746,31 @@ def main():
                      help="rho experiment, generic condition: expected clean uses of the trigger per step")
     ap.add_argument("--rho_density", type=int, default=8,
                      help="rho experiment: poison examples per poisoned batch")
+    ap.add_argument("--embdisp_k_grid", type=int, nargs="+", default=[1, 4, 16, 64],
+                     help="embdisp: poison examples in the single poisoned batch")
+    ap.add_argument("--embdisp_warmup", type=int, default=1000,
+                     help="embdisp: clean steps before the single poisoned batch")
+    ap.add_argument("--embdisp_window", type=int, default=30,
+                     help="embdisp: steps after the event over which cumulative displacement is read")
+    ap.add_argument("--weight_decay", type=float, default=0.01,
+                     help="AdamW weight decay; set 0 to test whether decoupled weight decay is "
+                          "what drives the long-training-length decline")
+    ap.add_argument("--pg_totals", type=int, nargs="+", default=[16, 32],
+                     help="paramgroup: fixed total poison counts to run (each must be divisible "
+                          "by every --events_grid value); two totals hedge floor/ceiling risk")
+    ap.add_argument("--beta2_grid", type=float, nargs="+", default=[0.95, 0.99, 0.999],
+                     help="beta2 experiment: Adam second-moment decay values to cross with spacing")
+    ap.add_argument("--spacing_grid", type=int, nargs="+", default=[10, 50, 250],
+                     help="beta2 experiment: step gap between consecutive poisoned batches")
+    ap.add_argument("--n_events", type=int, default=8,
+                     help="beta2 experiment: number of poisoned batches (total poison is n_events*per_event)")
+    ap.add_argument("--per_event", type=int, default=2,
+                     help="beta2 experiment: poison examples per poisoned batch")
+    ap.add_argument("--paramgroup_conditions", default="all",
+                     help="paramgroup experiment: 'all' or a comma-separated subset of "
+                          "adamw_trigadamw,adamw_trigsgd,sgd_trigadamw,sgd_trigsgd")
+    ap.add_argument("--lr_grid", type=float, nargs="+", default=[3e-4, 1e-3, 3e-3],
+                     help="lrscaling experiment: AdamW learning rates; Eq. 6 predicts N* ~ 1/lr")
     ap.add_argument("--append", action="store_true",
                      help="append to --out instead of overwriting (and skip the header) -- "
                           "use when merging a rerun's results into an existing partial CSV")
@@ -446,7 +780,9 @@ def main():
     t0 = time.time()
     mode = "a" if args.append else "w"
     with open(args.out, mode, newline="") as f:
-        fieldnames = ["experiment", "density", "n_poison", "n_clean", "seed", "asr"]
+        fieldnames = ["experiment", "density", "n_poison", "n_clean", "seed", "asr",
+                      "beta2", "spacing", "span_over_memory", "rest_opt", "trigger_opt", "lr",
+                      "disp_step", "disp_window", "pred_disp"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         if not args.append:
             writer.writeheader()
@@ -462,6 +798,14 @@ def main():
             run_placement_experiment(args, writer, f)
         if args.experiment == "events":
             run_events_experiment(args, writer, f)
+        if args.experiment == "beta2":
+            run_beta2_experiment(args, writer, f)
+        if args.experiment == "paramgroup":
+            run_paramgroup_experiment(args, writer, f)
+        if args.experiment == "lrscaling":
+            run_lrscaling_experiment(args, writer, f)
+        if args.experiment == "embdisp":
+            run_embdisp_experiment(args, writer, f)
     print(f"done in {time.time()-t0:.1f}s -> {args.out}")
 
 
