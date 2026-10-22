@@ -9,7 +9,7 @@ EXP = os.environ.get("EXP_DIR", os.path.join(REPO, "experiments", "poisoning"))
 def jobs():
     out = {}
     for line in open(os.path.join(os.path.dirname(__file__), "jobs.sh"), encoding="utf-8"):
-        m = re.match(r'JOB_(\w)="([^|]+)\|(\d+)\|', line)
+        m = re.match(r'JOB_(\w+)="([^|]+)\|(\d+)\|', line)
         if m:
             out[m.group(1)] = (m.group(2), int(m.group(3)))
     return out
