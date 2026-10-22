@@ -29,6 +29,30 @@ bash pod/launch.sh wave1         # starts H, A, B, E: four background processes,
 It refuses to start a job whose CSV already exists, so nothing is overwritten or doubled.
 One job alone: `bash pod/launch.sh H`. The jobs keep running if you close the terminal.
 
+**Check the GPU is actually used.** First line of each log must be `device=cuda`:
+`head -1 /tmp/project_scratch/logs/H.log`. `launch.sh` now runs the preflight first and refuses to start on a
+machine without a working GPU, and the script itself exits with `REFUSING to run on CPU` if CUDA is missing.
+
+
+## Wave 2 (run this next)
+
+```
+git pull                                   # REQUIRED: new experiment modes
+bash pod/launch.sh wave2                   # M1 M2 M3 M4 M5 K1 K2  (7 jobs)
+python pod/status.py
+```
+Then, when those finish: `bash pod/launch.sh wave3`  (I C D B2 — 4 jobs).
+
+Expected rows: M1-M5 48 each, K1 168, K2 112, I 96, C 120, D 84, B2 360.
+M4 and M5 train a 25M-parameter model and are the slowest; everything else is the
+0.8M model you have already run. If seven at once is too many for the card, start
+M1 M2 M3 K1 first and the rest when they finish.
+
+**One thing to check before leaving it:** M4's log should print `params=25,302,081` and a
+`clean_loss` similar to M1's. If `clean_loss` at 512:8 is much worse than at 64:2, the big
+model is badly tuned at lr 1e-3 and the comparison is confounded — tell me and I'll adjust
+before you spend more time. (M5 is the control for exactly this.)
+
 ## 3. Check progress
 ```
 python pod/status.py             # state, rows done/expected, errors, ETA, last log line, GPU, RAM

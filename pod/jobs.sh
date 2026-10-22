@@ -6,3 +6,23 @@ JOB_H="results_embdisp.csv|80|--experiment embdisp --out results_embdisp.csv --d
 JOB_C="results_lrscaling.csv|120|--experiment lrscaling --out results_lrscaling.csv --dim 128 --layers 4 --seeds 5 --n_clean 3000 --rho_density 8 --lr_grid 3e-4 1e-3 3e-3 --n_poison_grid 2 4 8 16 32 64 128 256"
 JOB_D="results_events_matched.csv|84|--experiment events --out results_events_matched.csv --dim 128 --layers 4 --seeds 6 --n_clean 3000 --sgd_lr 0.1 --optimizers adamw sgd --events_grid 1 2 4 16 --per_event_grid 4 8 16 32 64 --only_N 64 128"
 WAVE1="H A B E"
+
+# ---- Wave 2 (added after Wave 1; Job A's interference test failed and M/K/C replace it) ----
+# Model-size sweep: one job per size so four pods run in parallel. 110K -> 25.3M params.
+JOB_M1="results_th_modelsize_64x2.csv|48|--experiment threshold --th_axis modelsize --model_grid 64:2 --out results_th_modelsize_64x2.csv --n_clean 3000 --rho_density 4 --n_poison_grid 2 4 8 16 32 64 --seeds 8"
+JOB_M2="results_th_modelsize_128x4.csv|48|--experiment threshold --th_axis modelsize --model_grid 128:4 --out results_th_modelsize_128x4.csv --n_clean 3000 --rho_density 4 --n_poison_grid 2 4 8 16 32 64 --seeds 8"
+JOB_M3="results_th_modelsize_256x4.csv|48|--experiment threshold --th_axis modelsize --model_grid 256:4 --out results_th_modelsize_256x4.csv --n_clean 3000 --rho_density 4 --n_poison_grid 2 4 8 16 32 64 --seeds 8"
+JOB_M4="results_th_modelsize_512x8.csv|48|--experiment threshold --th_axis modelsize --model_grid 512:8 --out results_th_modelsize_512x8.csv --n_clean 3000 --rho_density 4 --n_poison_grid 2 4 8 16 32 64 --seeds 8"
+# Tuning control for the largest model: same cells at a lower learning rate, so a flat or
+# rising N* at 512:8 cannot be blamed on lr=1e-3 being wrong for that size.
+JOB_M5="results_th_modelsize_512x8_lr3e4.csv|48|--experiment threshold --th_axis modelsize --model_grid 512:8 --lr 3e-4 --out results_th_modelsize_512x8_lr3e4.csv --n_clean 3000 --rho_density 4 --n_poison_grid 2 4 8 16 32 64 --seeds 8"
+# Density: Prop 3 predicts N* proportional to k (exponent 1); example-counting predicts flat.
+JOB_K1="results_th_density_low.csv|168|--experiment threshold --th_axis density --density_grid 1 2 4 --out results_th_density_low.csv --dim 128 --layers 4 --n_clean 3000 --n_poison_grid 2 4 8 16 32 64 128 --seeds 8"
+JOB_K2="results_th_density_high.csv|112|--experiment threshold --th_axis density --density_grid 8 16 --out results_th_density_high.csv --dim 128 --layers 4 --n_clean 3000 --n_poison_grid 2 4 8 16 32 64 128 --seeds 8"
+# Corrected interference test (replaces the failed Job A): beta2 and a compensating lr on
+# the trigger row only, events late enough that Adam bias correction is negligible.
+JOB_I="results_interference2.csv|96|--experiment interference2 --out results_interference2.csv --dim 128 --layers 4 --n_clean 12000 --end_frac 0.9 --n_events 8 --per_event 4 --beta2_grid 0.9 0.95 0.99 0.999 --spacing_grid 10 50 250 --seeds 8"
+# Paramgroup top-up: seeds 5-19, pooled with Wave 1's seeds 0-4 for 20 per cell.
+JOB_B2="results_paramgroup_topup.csv|360|--experiment paramgroup --out results_paramgroup_topup.csv --dim 128 --layers 4 --seed_offset 5 --seeds 15 --n_clean 3000 --sgd_lr 0.1 --pg_totals 16 32 --events_grid 1 4 16 --paramgroup_conditions adamw_trignone,adamw_trigadamw,adamw_trigsgd,sgd_trigadamw"
+WAVE2="M1 M2 M3 M4 M5 K1 K2"
+WAVE3="I C D B2"

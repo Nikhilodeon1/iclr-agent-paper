@@ -6,6 +6,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$here/env.sh"; . "$here/jobs.sh"
 command -v python >/dev/null || { echo "no python: run . pod/env.sh first"; exit 1; }
+python "$here/preflight.py" || { echo "preflight failed: not launching (no job should run on CPU)"; exit 1; }
 start() {
   local j="$1" var="JOB_$1"; local spec="${!var:-}"
   [ -n "$spec" ] || { echo "unknown job $j"; return 1; }

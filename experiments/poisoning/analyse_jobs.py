@@ -159,6 +159,100 @@ def h_embdisp(df):
     print("\nAdamW: disp_step ~flat across k and ratio_to_pred ~1 supports the premise. SGD: rel_to_k_min should grow ~ in proportion to k.")
 
 
+def n50_ci(sub, boot=2000, seed=0):
+    """N* with a bootstrap CI over seeds (the seeds are the resampling unit)."""
+    rng = np.random.default_rng(seed)
+    seeds = sub.seed.unique()
+    pt = n50(sub)
+    draws = []
+    for _ in range(boot):
+        pick = rng.choice(seeds, size=len(seeds), replace=True)
+        rs = pd.concat([sub[sub.seed == s] for s in pick])
+        v = n50(rs)
+        if np.isfinite(v):
+            draws.append(v)
+    if len(draws) < boot * 0.5:
+        return pt, float("nan"), float("nan")
+    return pt, float(np.percentile(draws, 2.5)), float(np.percentile(draws, 97.5))
+
+
+def threshold(df):
+    """N* against whichever factor the sweep varied, with a log-log slope."""
+    axis = df.experiment.iloc[0].split("_")[1]
+    xcol = {"modelsize": "n_params", "density": "density", "lr": "lr", "batch": "batch"}[axis]
+    print(f"== THRESHOLD sweep over {axis} (x = {xcol}) ==")
+    rows = []
+    for x, g in df.groupby(xcol):
+        pt, lo, hi = n50_ci(g)
+        cl = g.clean_loss.mean() if "clean_loss" in g else float("nan")
+        asr_at = g.groupby("n_poison").asr.mean()
+        rows.append(dict(x=x, n_star=pt, lo=lo, hi=hi, seeds=g.seed.nunique(),
+                         clean_loss=round(cl, 3), min_asr=round(asr_at.min(), 2),
+                         max_asr=round(asr_at.max(), 2)))
+    t = pd.DataFrame(rows).sort_values("x")
+    print(t.to_string(index=False, float_format=lambda v: f"{v:.3g}"))
+    cens = t[~np.isfinite(t.n_star)]
+    if len(cens):
+        print(f"  !! {len(cens)} cell(s) never cross 50% ASR inside the poison grid: "
+              f"N* is censored there and the slope below ignores them.")
+    ok = t[np.isfinite(t.n_star) & (t.x > 0)]
+    if len(ok) >= 2:
+        sl = np.polyfit(np.log(ok.x.astype(float)), np.log(ok.n_star), 1)[0]
+        pred = {"modelsize": "0 (no model-size term in either proposition)",
+                "density": "1 (Prop 3: N* = k x E*); 0 if poison examples are what count",
+                "lr": "-1 (Eq 4: budget proportional to 1/eta); 0 under frequency counting",
+                "batch": "unpredicted"}[axis]
+        print(f"  log-log slope of N* vs {xcol} = {sl:.2f}   (predicted: {pred})")
+        if axis == "modelsize":
+            rng_ = ok.x.max() / ok.x.min()
+            print(f"  parameter range covered: {rng_:.0f}x ({ok.x.min():,.0f} to {ok.x.max():,.0f}); "
+                  f"N* range {ok.n_star.min():.1f} to {ok.n_star.max():.1f} "
+                  f"({ok.n_star.max()/ok.n_star.min():.2f}x)")
+    if "clean_loss" in df and df.clean_loss.notna().any():
+        print("  CHECK: clean_loss should be comparable across cells; a cell that failed to "
+              "learn the clean task cannot be compared on attack success.")
+
+
+def interference2(df):
+    """Corrected interference test: beta2 effect at matched per-event step size."""
+    print("== INTERFERENCE (corrected: trigger-row lr compensated, events placed late) ==")
+    print("Step-matching check -- disp_step/disp_window should be comparable across beta2")
+    print("within a spacing; pred_disp is identical by construction.")
+    m = df.groupby(["beta2", "spacing"]).agg(
+        n=("asr", "size"), succ=("asr", lambda s: int((s > 0.5).sum())),
+        mean_asr=("asr", "mean"), span_mem=("span_over_memory", "first"),
+        trig_lr=("trig_lr", "first"), disp_step=("disp_step", "mean"),
+        disp_window=("disp_window", "mean")).reset_index()
+    print(m.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
+    ref = m[m.beta2 == m.beta2.min()]
+    print("\nContrast across beta2 WITHIN each spacing (placement identical by construction):")
+    for sp, g in m.groupby("spacing"):
+        g = g.sort_values("beta2")
+        lo_b, hi_b = g.beta2.iloc[0], g.beta2.iloc[-1]
+        a = df[(df.spacing == sp) & (df.beta2 == lo_b)].asr
+        b = df[(df.spacing == sp) & (df.beta2 == hi_b)].asr
+        print(f"  spacing {sp:4d}: beta2={lo_b:g} mean {a.mean():.3f} (span/mem "
+              f"{g.span_over_memory.iloc[0] if 'span_over_memory' in g else g.span_mem.iloc[0]:.2f}) vs "
+              f"beta2={hi_b:g} mean {b.mean():.3f} (span/mem {g.span_mem.iloc[-1]:.2f}), "
+              f"two-sided MW p={mw(a, b):.3g}")
+    print("\nPREDICTION (fixed in advance): with step size matched, ASR falls as span/memory "
+          "drops below 1, so higher beta2 gives LOWER ASR at fixed spacing. The beta2="
+          f"{m.beta2.min():g} row has span/memory > 1 everywhere and is the placement control: "
+          "its trend across spacing is placement alone and should be subtracted.")
+    ctrl = m[m.beta2 == m.beta2.min()].sort_values("spacing")
+    if len(ctrl) >= 2:
+        print(f"  placement control (beta2={m.beta2.min():g}) mean ASR across spacing: "
+              + ", ".join(f"s{int(r.spacing)}={r.mean_asr:.3f}" for r in ctrl.itertuples()))
+    sub = m[m.span_mem < 1]
+    print(f"  cells genuinely inside the interference window (span/memory < 1): {len(sub)} of {len(m)}")
+    if df.disp_window.notna().any():
+        w = df.groupby("beta2").disp_window.mean()
+        print(f"  measured disp_window by beta2: "
+              + ", ".join(f"{b:g}:{v:.4f}" for b, v in w.items())
+              + f"  (max/min = {w.max()/w.min():.2f}x; if this is large the cells are NOT "
+                "step-matched and the beta2 contrast is confounded again)")
+
+
 def main(paths):
     for p in paths:
         df = pd.read_csv(p)
@@ -172,6 +266,8 @@ def main(paths):
         elif e.startswith("events_"): events(df)
         elif e.startswith("dataset_size"): f_dataset(df)
         elif e.startswith("embdisp_"): h_embdisp(df)
+        elif e.startswith("th_"): threshold(df)
+        elif e.startswith("int2_"): interference2(df)
         else: print("unrecognised experiment tag:", e)
 
 

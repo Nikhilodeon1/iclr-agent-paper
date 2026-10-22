@@ -35,10 +35,7 @@ trigger-specific parameters receive gradient only on poisoned steps, each poison
 contains, and batches closer together than the second-moment memory $1/(1-\beta_2)$
 interfere. This zero-parameter prediction correlates with attack success
 across the 11 schedule, length and placement conditions we ran (Spearman $0.67$,
-$p=0.02$), though pooled over heterogeneous groups and so weak on its own, and an
-optimizer intervention is consistent with it: at a fixed poison count, splitting it
-across more batches takes AdamW from $2/5$ to $5/5$ runs succeeding at $N=16$ while SGD
-stays at $0/5$ throughout. Continuing pretraining of a pretrained model on natural
+$p=0.02$), though pooled over heterogeneous groups and so weak on its own, and direct measurements bear on it. One poisoned batch moves the trigger's embedding row by the same amount, to within 3\% of the closed form, whether it holds 1 or 64 poison examples under AdamW, and in proportion to the number of examples under SGD. At 20 seeds and a fixed $N=16$, splitting the poison over 16 batches rather than 1 takes AdamW from $5/20$ to $13/20$ runs succeeding (paired exact $p=0.008$) while SGD stays at floor ($1/20$). A test fixed in advance of the predicted interference between nearby poisoned batches, varying $\beta_2$, was not supported. Continuing pretraining of a pretrained model on natural
 text, with trigger frequencies measured from the corpus rather than imposed, reproduces
 the predicted ordering: the poison needed rises monotonically with corpus frequency and
 a never-occurring trigger is cheapest to implant by $3.5$--$5\times$. We state two limits plainly. The model has no model-size axis, so it
@@ -95,8 +92,7 @@ discounted when they fall within the second-moment memory of one another.
     \item A closed-form result for an idealized Adam recurrence
     (Proposition~\ref{prop:adam-events}): for trigger-specific coordinates, the
     displacement caused by a poisoned batch is independent of how many poison examples
-    that batch contains, and depends instead on the spacing between batches, with an
-    explicit interference formula. This accounts for why higher per-batch density makes
+    that batch contains, and depends instead on the spacing between batches, with an explicit interference formula (which our one test did not support). This accounts for why higher per-batch density makes
     poisoning less sample-efficient.
     \item Validation on a transformer trained from scratch, including a fixed before running
     test of the $q$ transition, and an account of where the theory's reach
@@ -104,7 +100,8 @@ discounted when they fall within the second-moment memory of one another.
     decay beyond it is predicted in direction but not in magnitude.
     \item A controlled optimizer intervention (Section~\ref{sec:events}): on the same
     transformer, holding the total poison count fixed and varying how many batches it
-    is split into raises attack success under AdamW but not under SGD. At 5 seeds this is suggestive rather than established ($2/5$ to $5/5$ AdamW runs succeeding at $N=16$, with overlapping Wilson intervals, against an SGD arm at floor), and it is the comparison that most needs further seeds.
+    is split into raises attack success under AdamW but not under SGD. At 20 seeds AdamW goes from $5/20$ to $13/20$ successes at $N=16$ (paired exact $p=0.008$; the Wilson intervals just touch) against an SGD arm at floor ($1/20$), which bounds rather than establishes the contrast.
+    \item Direct tests of the Adam mechanism (Section~\ref{sec:direct}): a measurement of the trigger embedding's displacement that matches the closed form (supported), a pre-specified $\beta_2$ test of interference (not supported, and its design confounds step size with interference), and a parameter-group test that supports the mechanism only partly.
 \end{enumerate}
 
 \section{Related Work}
@@ -393,8 +390,7 @@ condition of Section~\ref{sec:validation} is not a clean test of the formula.
 trigger-specific parameters, such as the trigger's embedding, which see gradient only on
 poisoned steps. Parameters shared with the clean task have their second moment set by
 clean gradients; for them Adam acts like SGD with a rescaled step, and a poisoned batch
-moves them in proportion to the poison it contains. Under Adam the attack therefore
-draws on two resources -- poisoned batches through the trigger-specific channel
+moves them in proportion to the poison it contains. Under Adam the attack therefore, on this account, draws on two resources -- poisoned batches through the trigger-specific channel
 (discounted within $1/(1-\beta_2)$ steps of one another) and poison examples through the
 shared channel -- whereas under SGD both count examples. The resulting prediction, which
 SGD does not make, is that at fixed total poison, spreading it over more batches
@@ -410,7 +406,7 @@ Section~\ref{sec:events} is what the claim rests on.
 and parameters that process the trigger jointly with clean tokens; it also predicts
 interference between poisoned batches spaced within $1/(1-\beta_2)$ steps, which is
 compatible with the reported insensitivity to poisoned-batch frequency because typical
-pretraining spacings are far wider than that window. Appendix~\ref{app:idealize}
+pretraining spacings are far wider than that window; our own $\beta_2$ test of the interference prediction was not supported (Section~\ref{sec:direct}), so this compatibility argument is itself untested. Appendix~\ref{app:idealize}
 discusses both points and what they predict.
 
 \section{Real-Transformer Validation}
@@ -461,8 +457,7 @@ without appealing to the dynamics, so this experiment is consistent with the thr
 Proposition~\ref{prop:fraction-regime} from that simpler account. Distinguishing them
 needs a prediction frequency counting does not make. Equation~\ref{eq:budget} supplies
 one ($N^*\propto1/\eta$ at fixed required margin) and Proposition~\ref{prop:adam-events}
-supplies another (interference on a $1/(1-\beta_2)$ scale); neither is tested here, and
-we regard them as the experiments this paper most needs.
+supplies another (interference on a $1/(1-\beta_2)$ scale). The first is untested here; a test of the second (Section~\ref{sec:direct}) was not supported.
 
 \subsection{Results}
 
@@ -500,7 +495,7 @@ longest possible exposure to the erosion documented above. The apparent batch-co
 \textbf{Reconciling Figure~\ref{fig:realmodel}b with Section~\ref{sec:events}.} The same
 nominal condition (AdamW, $N=16$, $T=3{,}000$) appears in both sweeps with different
 results: $0.00$ versus $0.376$ at one batch, $0.23$ versus $0.724$ at four, and $0.53$
-versus $0.841$ at sixteen. We have \emph{not} established the cause of this discrepancy. The two sweeps differ in where the single poisoned batch lands (step 5 versus step $1{,}500$, a difference of nearly $1{,}500$ clean steps of subsequent training) and in whether network initialisation is seeded (Appendix~\ref{app:protocol}); these are confounded with each other, and with 5 seeds the one-batch contrast alone ($0/5$ versus $2/5$ successes) is not significant (Fisher exact $p=0.44$). Section~\ref{sec:events} holds the span of training over which poison is delivered fixed while varying only how the budget is divided, so it is the more controlled comparison, and the batch-count claim rests on it alone. A single-protocol rerun with seeded initialisation would resolve the discrepancy; until then Figure~\ref{fig:realmodel}b should be read as uninformative about batch count.
+versus $0.841$ at sixteen. We have \emph{not} established the cause of this discrepancy. The two sweeps differ in where the single poisoned batch lands (step 5 versus step $1{,}500$, a difference of nearly $1{,}500$ clean steps of subsequent training) and in whether network initialisation is seeded (Appendix~\ref{app:protocol}); these are confounded with each other, and with 5 seeds the one-batch contrast alone ($0/5$ versus $2/5$ successes) is not significant (Fisher exact $p=0.44$). Section~\ref{sec:events} holds the span of training over which poison is delivered fixed while varying only how the budget is divided, so it is the more controlled comparison, and the batch-count claim rests on it alone. At 20 seeds Section~\ref{sec:events}'s configuration gives mean ASR $0.22$, $0.51$ and $0.67$ for 1, 4 and 16 batches, between the two earlier sets; gaps of this size are what 5 seeds can produce (zero successes in five runs has probability $0.24$ at a true rate of $0.25$), though the generators also differ in placement. A single-protocol rerun with seeded initialisation would resolve the discrepancy; until then Figure~\ref{fig:realmodel}b should be read as uninformative about batch count.
 
 \textbf{Placement ($N=16$, $T=32{,}000$, 5 runs per condition).} Sixteen single-example poisoned batches are placed in the first $10\%$ of training (early), evenly from step 5 to $T-5$ (even), or in the last $10\%$ (late). Mean ASR is $0.13$, $0.55$ and $0.29$. No pairwise difference is significant (two-sided Mann--Whitney: early versus late $p=1.00$, early versus even $p=0.22$, late versus even $p=0.30$), so this experiment neither supports nor excludes an explanation in terms of erosion after the final dose.
 
@@ -560,50 +555,44 @@ budget tested (25).}
 \subsection{Controlled Optimizer Intervention: AdamW versus SGD}
 \label{sec:events}
 
-% ==== PLUG-IN SLOT 1: events top-up (results_events_{adamw,sgd}_topup.csv, seeds 5-14) ====
-% When the top-up lands, recompute from the POOLED 15 seeds/cell and update, in this order:
-%   (a) this paragraph's numbers: AdamW 0.38 -> 0.84 at N=16, its p=0.045, SGD's flat 0.00,
-%       and the N=64 SGD rise 0.14->0.25 / p=0.26. (A pooled rank correlation was
-%       removed: its sign for SGD flips with the pooling choice, because N=256/1024
-%       sit at the ceiling for both optimizers and contribute only tie-noise.);
-%   (b) the same three numbers where they repeat in the abstract;
-%   (c) "5 seeds per cell" -> "15 seeds per cell" in this paragraph and in the fig:events caption;
-%   (d) re-render figures/fig_events.pdf from the pooled results_events_tidy.csv.
-% Nothing else in the paper depends on these numbers.
-Section~\ref{sec:validation}'s conditions vary the optimizer's real schedule, but not
-the optimizer itself, so the batch-count effect there is a correlation. To test it
-causally, we train the same transformer with SGD (momentum $0.9$, learning rate
-$0.1$, tuned to match AdamW's clean-data loss) instead of AdamW, and hold the total
-poison count $N$ fixed while varying how many batches it is split into, at $T=3{,}000$
-(5 seeds per cell). Proposition~\ref{prop:adam-events} predicts more batches raise
-attack success under AdamW and not under SGD.
+Section~\ref{sec:validation}'s conditions vary the schedule but not the optimizer, so the
+batch-count effect there is a correlation. To test it directly, we train the same
+transformer with SGD (momentum $0.9$, learning rate $0.1$, tuned to match AdamW's
+clean-data loss) instead of AdamW and hold the total poison count $N$ fixed while varying
+how many batches $E$ it is split into, at $T=3{,}000$.
+Proposition~\ref{prop:adam-events} predicts that more batches raise attack success under
+AdamW and not under SGD. An earlier 5-seed version of this experiment gave AdamW $2/5$,
+$5/5$ and $5/5$ successes at 1, 4 and 16 batches; that estimate was optimistic, and we
+report the 20-seed run, which supersedes it at $N=16$ (Figure~\ref{fig:events} still shows the earlier run).
 
-The ordering matches the prediction, but the evidence is weaker than the means suggest
-(Figure~\ref{fig:events}). At $N=16$, mean ASR under AdamW rises from $0.38$ at 1 batch
-to $0.84$ at 16 (one-sided Mann--Whitney $p=0.045$), while under SGD it is $0.00$ at
-every batch count. Individual runs, however, are close to bimodal: almost every run ends
-near $0$ or near $1$, so a mean over 5 runs is really a success count out of 5, and means
-$\pm$ standard error overstate the precision. Scoring each run as success ($\mathrm{ASR}>0.5$)
-and reporting Wilson intervals, AdamW at $N=16$ goes from $2/5$ $[0.12,0.77]$ at 1 batch
-to $5/5$ $[0.57,1.00]$ at 16 batches --- intervals that overlap. The effect is therefore suggestive and correctly ordered, but not established at this sample size; the $p=0.045$ is one-sided and uncorrected for the several comparisons we examined (for example $p=0.071$ for 1 versus 4 batches), and would not survive a correction; 15--20 seeds
-per cell would be needed to resolve it, and we flag this rather than rest weight on the
-$p$-value.
+At $N=16$ (Table~\ref{tab:events20}), AdamW succeeds (ASR $>0.5$) in $5/20$ runs at 1 batch
+$[0.11,0.47]$, $11/20$ at 4 and $13/20$ at 16 $[0.43,0.82]$, with mean ASR $0.22$, $0.51$
+and $0.67$. The seed fixes both initialisation and the clean data stream, independent of
+$E$, so runs are paired across batch counts. Of the 8 seeds whose outcome differs between 1
+and 16 batches, all 8 succeed only at 16, and none succeeds at 1 batch and fails at 16
+(exact McNemar $p=0.008$; unpaired Fisher $p=0.025$). Two comparisons were designated in
+advance, AdamW and SGD at 1 versus 16 batches, and the $p$-values are uncorrected for those
+two; 1 versus 4 batches (paired $p=0.031$) is a further comparison. The Wilson intervals at 1
+and 16 batches just touch, so we describe the effect as supported by the paired test and
+modest in sample size, not as large. The same seeds rerun on different hardware did not
+reproduce per-seed outcomes (one seed went from $0.02$ to $0.58$ ASR at one batch), so
+outcomes near the threshold are sensitive and the earlier 5-seed means ($0.38$, $0.72$,
+$0.84$) were higher than seeds 5--19 give ($2/15$, $8/15$, $10/15$ successes).
 
-\textbf{The SGD arm is at floor, and bounds rather than establishes the contrast.} At
-$N=16$ SGD records $0/5$ successes at every batch count, Wilson interval $[0,0.43]$. A
-null effect measured at the floor cannot distinguish ``batch count does not matter under
-SGD'' from ``SGD cannot implant this backdoor at this budget at all'' --- and the latter
-is plausible, since rare-feature learning under SGD is known to be slow relative to
-adaptive methods~\citep{duchi2011adagrad,kunstner2024heavytailed}. The only SGD data away
-from the floor points weakly the same way as AdamW rather than against it: at $N=64$,
-SGD rises $0.14\to0.25$ in mean ASR ($0/5$, $0/5$ and $1/5$ successes; $p=0.26$). The
-comparison we report is thus consistent with Proposition~\ref{prop:adam-events} but does
-not isolate it. The experiment that would is a matched-difficulty comparison, choosing
-$N$ per optimizer so that the 1-batch success rate is near $0.5$ in both arms (SGD is off the floor at $N=64$ and saturated at $N=256$, so $N\approx128$ is a plausible but unmeasured choice for that arm), and we identify that as the decisive missing run. A further
-caveat: the SGD learning rate was tuned to match AdamW's clean-data loss, not its attack
-dynamics, so the arms are matched on optimisation quality and not on attack strength.
-
-At $N=4$ and $N=256$ both optimizers sit near floor and ceiling respectively, so no separation is possible there ($N=256$ is in the supplementary results file but not plotted).
+\textbf{The SGD arm is at floor, and bounds rather than establishes the contrast.} SGD
+succeeds in $1/20$ runs at every batch count, and it is the same seed each time. A null
+effect measured at the floor cannot distinguish ``batch count does not matter under SGD''
+from ``SGD cannot implant this backdoor at this budget at all'' --- and the latter is
+plausible, since rare-feature learning under SGD is known to be slow relative to adaptive
+methods~\citep{duchi2011adagrad,kunstner2024heavytailed}. The only SGD data away from the
+floor are from the earlier 5-seed run at $N=64$, where SGD rises $0.14\to0.25$ in mean ASR
+($p=0.26$) and which we did not repeat. The decisive missing run is a matched-difficulty
+comparison, choosing $N$ per optimizer so that the 1-batch success rate is near $0.5$ in
+both arms (SGD is off the floor at $N=64$ and saturated at $N=256$, so $N\approx128$ is a
+plausible but unmeasured choice for that arm). The SGD learning rate was tuned to match
+AdamW's clean-data loss, not its attack dynamics, so the arms are matched on optimisation
+quality and not on attack strength. In the earlier 5-seed run, $N=4$ and $N=256$ sit near
+floor and ceiling respectively, so no separation is possible there.
 
 \begin{figure}[t]
 \begin{center}
@@ -611,7 +600,7 @@ At $N=4$ and $N=256$ both optimizers sit near floor and ceiling respectively, so
 \end{center}
 \caption{Attack success versus the number of poisoned batches $E$ at three fixed
 poison totals $N$ ($4$, $16$ and $64$), comparing AdamW against SGD (momentum $0.9$,
-lr $0.1$) on the same transformer, $T=3{,}000$, 5 seeds per point. Small points are
+lr $0.1$) on the same transformer, $T=3{,}000$, from the earlier 5-seed run (superseded at $N=16$ by the 20-seed counts in Table~\ref{tab:events20}). Small points are
 individual runs, which are close to bimodal; large markers are means, shown with
 standard error for continuity with the text, though Wilson intervals on success counts
 (Section~\ref{sec:events}) are the appropriate summary and overlap. The ordering matches
@@ -620,6 +609,53 @@ at ceiling, and the SGD arm at $N=16$ is at floor, so none of the three panels i
 the mechanism on its own.}
 \label{fig:events}
 \end{figure}
+
+\subsection{Direct Tests of the Adam Mechanism}
+\label{sec:direct}
+
+\textbf{Embedding displacement (fixed in advance; supported).} Proposition~\ref{prop:adam-events}
+rests on the premise that a poisoned batch moves the trigger's own embedding row by an amount
+independent of how many poison examples it contains. We measure it: after 1{,}000 clean steps we
+apply one poisoned batch of $k\in\{1,4,16,64\}$ poison examples and record the change in the L2
+norm of the trigger's embedding row across that step (5 seeds per cell; Table~\ref{tab:embdisp}).
+Under AdamW the displacement is $0.0050$ to $0.0051$ for all $k$ at $\beta_2=0.95$ against a closed
+form of $0.00506$, and likewise flat at $\beta_2=0.99$ ($0.0111$--$0.0113$ against $0.0113$) and
+$\beta_2=0.999$ ($0.0276$--$0.0284$ against $0.0285$; at $k=1$ it is $3\%$ low, the $\epsilon$ effect
+noted in the appendix). Under SGD it grows in proportion to $k$: $0.00003$, $0.00013$, $0.00052$ and
+$0.00208$ for $k=1,4,16,64$ ($63.6\times$ for $64\times$ the poison). This confirms the premise; it
+does not show that the premise produces the attack-success effect.
+
+\textbf{$\beta_2$ and interference (fixed in advance; not supported).} Proposition~\ref{prop:adam-events}
+also predicts that poisoned batches closer together than $1/(1-\beta_2)$ interfere. We held $N=16$
+fixed in 8 batches of 2, pinned the last batch at step $2{,}400$, and crossed
+$\beta_2\in\{0.95,0.99,0.999\}$ with spacing $\{10,50,250\}$ (10 seeds per cell;
+Table~\ref{tab:beta2}). Our prediction, written before the runs, was that success would be lowest
+where batches fall inside Adam's memory, at $\beta_2=0.999$ with spacing 10 and 50. It was not:
+success at $\beta_2=0.999$ was at least as high as at $0.95$ at every spacing ($0.86$ against $0.82$,
+$0.87$ against $0.83$, $0.69$ against $0.56$), with no difference significant (two-sided
+Mann--Whitney $p=0.27$, $0.17$, $0.52$). The prediction was also badly stated: the per-event step
+itself grows with $\beta_2$ (Table~\ref{tab:embdisp}), so the scalar recursion, run on these exact
+schedules after the data were seen, predicts displacement that \emph{rises} with $\beta_2$ even with
+interference ($0.028$, $0.045$ and $0.124$ at spacing 10), a direction the observed means share
+at spacing 250 and only weakly at 10 and 50. The sweep therefore confounds step size with
+interference and does not isolate interference. The recursion's displacement does not rank the nine
+cells (Spearman $0.05$), mainly because success falls at spacing 250 for every $\beta_2$, which we
+attribute, without having tested it, to the first dose falling earlier (step 650 against 2{,}330).
+We conclude only that the interference prediction is not supported, and we do not present it as a
+result.
+
+\textbf{Parameter groups (partly supported).} We repeated $N\in\{16,32\}$ and $E\in\{1,4,16\}$
+(5 seeds) with the trigger's embedding row in its own optimizer group. The unsplit AdamW control
+and the split arm agree (at $N=16$, mean ASR $0.37$, $0.69$, $0.88$ against $0.37$, $0.66$, $0.88$ for 1,
+4, 16 batches), so the split does not change the dynamics. We predicted that batch count matters only
+when the trigger row is on AdamW. At $N=16$ the rise with $E$ is $0.37\to0.88$ with the row on AdamW
+(Mann--Whitney $p=0.034$) and $0.27\to0.55$ with the row on SGD and the rest of the network on AdamW
+($p=0.42$): smaller, but not absent. With the network on SGD and only the row on AdamW, success rises
+$0.11\to0.49$ from a near-floor start. At $N=32$ the AdamW arms are at ceiling. Batch count thus
+matters most when the trigger row uses Adam, but the effect does not vanish when that is removed, and
+with 5 seeds we cannot separate the arms. The two-channel account of
+Section~\ref{sec:prop3} does not predict a rise with $E$ through the shared parameters, so we treat this
+as partial support and the remainder as unexplained.
 
 \input{realtext_section.tex}
 
@@ -658,14 +694,7 @@ clean task, which the scalar reduction does not track.
 theory~\citep{linearpoisoning2025,glmbackdoor2026}; Section~\ref{sec:realtext} adds a pretrained
 model on natural text at two seeds per cell. The theory is a scalar reduction. A $p=200$ simulation
 (Appendix~\ref{app:highdim}) finds that its orderings in $N$ and $\rho$ hold in every cell and in $T$ in 15 of 18, but also that Proposition~\ref{prop:fraction-regime} overestimates attack success at $\rho>0$ there (sign agreement 16 of 24), so we read it as consistent with the mechanism and the direction of the dependence rather than a quantitatively accurate threshold. Individual runs end close to 0 or 1, so we report success counts with Wilson intervals
-where it matters; at 5 seeds per cell those intervals are wide, and the key comparisons
-need 15--20 seeds to resolve. Three experiments would most change what can be concluded:
-an SGD sweep over training length, to test Proposition~\ref{thm:count-regime} under the
-optimizer it assumes rather than under AdamW; a matched-difficulty AdamW-versus-SGD
-comparison at a budget where neither arm is at the floor; and a $\beta_2\times$spacing
-sweep, which is the prediction frequency counting cannot make and which would also
-speak to real pretraining, where $\beta_2=0.95$ gives an interference window of only
-about 20 steps.
+where it matters. The key optimizer comparison now rests on 20 seeds, but the parameter-group and $\beta_2$ experiments use 5 and 10. Three experiments would most change what can be concluded: an SGD sweep over training length, to test Proposition~\ref{thm:count-regime} under the optimizer it assumes rather than under AdamW; a matched-difficulty AdamW-versus-SGD comparison at a budget where neither arm is at the floor; and a learning-rate sweep, since Equation~\ref{eq:budget} predicts a poison budget proportional to $1/\eta$ and frequency counting predicts none.
 
 \section{Conclusion}
 
@@ -996,6 +1025,75 @@ Placement: late & 0.257 & 0.29 \\
 \bottomrule
 \end{tabular}
 \end{center}
+\end{table}
+
+\subsection{Direct-Test Tables}
+\label{app:direct}
+
+\begin{table}[ht]
+\caption{Trigger-embedding displacement across one poisoned step (mean of 5 seeds; $d=128$, 4 layers, 1{,}000 clean steps before the event). Closed form omits $\epsilon$ and weight decay.}
+\label{tab:embdisp}
+\centering
+\small
+\begin{tabular}{llrrr}
+\toprule
+Optimizer & $\beta_2$ & poison examples $k$ & measured & closed form \\
+\midrule
+adamw & 0.95 & 1 & 0.00502 & 0.00506 \\
+adamw & 0.95 & 4 & 0.00505 & 0.00506 \\
+adamw & 0.95 & 16 & 0.00506 & 0.00506 \\
+adamw & 0.95 & 64 & 0.00506 & 0.00506 \\
+adamw & 0.99 & 1 & 0.01115 & 0.01131 \\
+adamw & 0.99 & 4 & 0.01126 & 0.01131 \\
+adamw & 0.99 & 16 & 0.01130 & 0.01131 \\
+adamw & 0.99 & 64 & 0.01131 & 0.01131 \\
+adamw & 0.999 & 1 & 0.02761 & 0.02846 \\
+adamw & 0.999 & 4 & 0.02820 & 0.02846 \\
+adamw & 0.999 & 16 & 0.02837 & 0.02846 \\
+adamw & 0.999 & 64 & 0.02843 & 0.02846 \\
+sgd & -- & 1 & 0.00003 & -- \\
+sgd & -- & 4 & 0.00013 & -- \\
+sgd & -- & 16 & 0.00052 & -- \\
+sgd & -- & 64 & 0.00208 & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\caption{$\beta_2\times$spacing sweep ($N=16$ in 8 batches of 2, last batch at step $2{,}400$, 10 seeds per cell). The last column is the scalar Adam recursion run on each cell's exact schedule, computed after the data were seen.}
+\label{tab:beta2}
+\centering
+\small
+\begin{tabular}{rrrrrr}
+\toprule
+$\beta_2$ & spacing & span/memory & successes & mean ASR & recursion displacement \\
+\midrule
+0.95 & 10 & 4 & 9/10 & 0.818 & 0.028 \\
+0.95 & 50 & 20 & 8/10 & 0.826 & 0.044 \\
+0.95 & 250 & 100 & 5/10 & 0.560 & 0.046 \\
+0.99 & 10 & 0.8 & 9/10 & 0.789 & 0.045 \\
+0.99 & 50 & 4 & 8/10 & 0.799 & 0.060 \\
+0.99 & 250 & 20 & 6/10 & 0.584 & 0.080 \\
+0.999 & 10 & 0.08 & 9/10 & 0.861 & 0.124 \\
+0.999 & 50 & 0.4 & 9/10 & 0.868 & 0.134 \\
+0.999 & 250 & 2 & 7/10 & 0.692 & 0.134 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\caption{Twenty-seed optimizer intervention at $N=16$, $T=3{,}000$. Successes are runs with ASR $>0.5$; Wilson 95\% intervals in brackets. The same SGD seed succeeds at every batch count.}
+\label{tab:events20}
+\centering
+\small
+\begin{tabular}{lrrr}
+\toprule
+Optimizer & 1 batch & 4 batches & 16 batches \\
+\midrule
+AdamW & 5/20 [0.11, 0.47] & 11/20 [0.34, 0.74] & 13/20 [0.43, 0.82] \\
+SGD & 1/20 [0.01, 0.24] & 1/20 [0.01, 0.24] & 1/20 [0.01, 0.24] \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \end{document}

@@ -27,6 +27,7 @@ Usage:
     python validate_transformer.py --experiment rho --out results_rho.csv
     python validate_transformer.py --experiment all --out results_all.csv
 """
+import os
 import argparse, csv, math, time
 import numpy as np
 import torch
@@ -159,6 +160,8 @@ def train_model(
     beta1=0.9,
     beta2=0.999,
     weight_decay=0.01,
+    trig_lr=None,
+    trig_beta2=None,
     probe_steps=None,   # steps at which to snapshot the trigger's embedding row (before that
                         # step's update); a final snapshot is stored under key n_clean_steps
     trigger_opt=None,   # None = one optimizer for everything; else "adamw"/"sgd"
@@ -180,9 +183,10 @@ def train_model(
     model = TinyGPT(vocab_size, d, n_layer, n_head, seq_len,
                     split_trigger=split, trigger_id=trigger_id).to(DEVICE)
 
-    def make_opt(name, params):
+    def make_opt(name, params, lr_=None, beta2_=None):
         if name == "adamw":
-            return torch.optim.AdamW(params, lr=lr, betas=(beta1, beta2),
+            return torch.optim.AdamW(params, lr=(lr if lr_ is None else lr_),
+                                     betas=(beta1, beta2 if beta2_ is None else beta2_),
                                      weight_decay=weight_decay)
         if name == "sgd":
             return torch.optim.SGD(params, lr=sgd_lr, momentum=0.9)
@@ -190,13 +194,18 @@ def train_model(
 
     if split:
         rest = [p for n, p in model.named_parameters() if n != "trig_emb"]
-        opts = [make_opt(optimizer, rest), make_opt(trigger_opt, [model.trig_emb])]
+        # trig_lr / trig_beta2 override the trigger row's group ONLY, leaving the clean
+        # network's optimiser untouched; this is what lets beta2 vary without also
+        # changing how the rest of the model trains.
+        opts = [make_opt(optimizer, rest),
+                make_opt(trigger_opt, [model.trig_emb], lr_=trig_lr, beta2_=trig_beta2)]
     else:
         opts = [make_opt(optimizer, model.parameters())]
 
     poison_map = dict(poison_schedule)
-    probe = set(probe_steps) if probe_steps else set()
+    probe = {s for s in probe_steps if s < n_clean_steps} if probe_steps else set()
     probe_log = {}
+    loss_log = []
 
     def trig_row():
         row = model.trig_emb if split else model.tok_emb.weight[trigger_id]
@@ -222,6 +231,7 @@ def train_model(
         loss = F.cross_entropy(logits.reshape(-1, vocab_size), x[:, 1:].reshape(-1))
         if not torch.isfinite(loss):
             raise RuntimeError(f"training diverged at step {t} (loss={loss.item()})")
+        loss_log.append(float(loss.item()))
         for o in opts:
             o.zero_grad()
         loss.backward()
@@ -236,6 +246,9 @@ def train_model(
     if probe:
         probe_log[n_clean_steps] = trig_row()
         model.probe_log = probe_log
+    # mean clean loss over the last 50 steps, so a sweep over model size or learning
+    # rate can show the clean task was actually learned in every cell
+    model.final_loss = float(np.mean(loss_log[-50:])) if loss_log else float("nan")
     return model
 
 
@@ -500,6 +513,13 @@ def run_events_experiment(args, writer, f):
                     print(f"[{tag}] k={k:3d} N={E*k:4d} seed={seed} asr={asr:.3f}", flush=True)
 
 
+def adam_event_displacement(beta1, beta2):
+    """Total displacement per unit learning rate from ONE isolated poisoned batch,
+    summed over the whole momentum tail (Equation 4 in the paper). 31.8 at the
+    defaults beta1=0.9, beta2=0.999."""
+    return (1 - beta1) / ((1 - beta1 / math.sqrt(beta2)) * math.sqrt(1 - beta2))
+
+
 def spaced_block_schedule(n_clean_steps, n_events, per_event, spacing, end_frac=0.8):
     """n_events poisoned batches separated by exactly `spacing` steps, with the LAST
     batch pinned at end_frac*n_clean_steps for every spacing.
@@ -651,6 +671,178 @@ def run_lrscaling_experiment(args, writer, f):
                 print(f"[{tag}] N={N:5d} seed={seed} asr={asr:.3f}", flush=True)
 
 
+def run_threshold_experiment(args, writer, f):
+    """Poison count needed for attack success, swept finely in N so the 50% threshold
+    N* can be interpolated, while ONE factor varies.
+
+    --th_axis modelsize : width and depth. Neither Proposition contains a model-size
+        term, so N* should not grow with parameter count. This is the invariance
+        souly2025poisoning report across 600M-13B parameters and the one axis this
+        paper otherwise only concedes it cannot address.
+    --th_axis density   : poison examples per poisoned batch, k. Proposition 3 makes the
+        trigger row's displacement per poisoned batch independent of k, so reaching a
+        fixed number of batches E* costs N* = k * E*, i.e. N* proportional to k
+        (exponent 1). An account that counts poison examples predicts N* flat in k.
+        This is souly2025poisoning's density finding, stated quantitatively.
+    --th_axis lr        : Equation 4's budget is proportional to 1/eta at fixed required
+        margin; a frequency-counting account predicts no eta dependence at all.
+    --th_axis batch     : clean batch size, at fixed poison count.
+    """
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    if args.th_axis == "modelsize":
+        configs = []
+        for spec in args.model_grid:
+            d_s, l_s = spec.split(":")
+            configs.append(dict(tag=f"d{d_s}L{l_s}", d=int(d_s), n_layer=int(l_s),
+                                density=args.rho_density, lr=args.lr, batch=args.batch))
+    elif args.th_axis == "density":
+        configs = [dict(tag=f"k{k}", d=args.dim, n_layer=args.layers, density=k,
+                        lr=args.lr, batch=args.batch) for k in args.density_grid]
+    elif args.th_axis == "lr":
+        configs = [dict(tag=f"lr{lr:g}", d=args.dim, n_layer=args.layers,
+                        density=args.rho_density, lr=lr, batch=args.batch)
+                   for lr in args.lr_grid]
+    elif args.th_axis == "batch":
+        configs = [dict(tag=f"b{b}", d=args.dim, n_layer=args.layers,
+                        density=args.rho_density, lr=args.lr, batch=b)
+                   for b in args.batch_grid]
+    else:
+        raise ValueError(args.th_axis)
+
+    for c in configs:
+        if c["d"] % 4:
+            raise ValueError(f"width {c['d']} is not divisible by n_head=4")
+        for n_poison in args.n_poison_grid:
+            if n_poison > c["density"] * c["batch"] * args.n_clean:
+                raise ValueError(f"{c['tag']}: N={n_poison} cannot fit in training")
+            s = spaced_or_spread(args.n_clean, n_poison, c["density"], c["batch"])
+            steps = [i for i, _ in s]
+            assert len(set(steps)) == len(steps), f"{c['tag']} N={n_poison}: duplicate steps"
+            assert sum(k for _, k in s) == n_poison, f"{c['tag']} N={n_poison}: lost poison"
+            assert max(steps) < args.n_clean and all(k <= c["batch"] for _, k in s)
+    total = len(configs) * len(args.n_poison_grid) * args.seeds * args.n_clean
+    print(f"[threshold:{args.th_axis}] preflight OK; {len(configs)} configs x "
+          f"{len(args.n_poison_grid)} poison levels x {args.seeds} seeds; "
+          f"{total:,} total training steps (~{total/37/3600:.1f} h at 37 steps/s on the "
+          f"A40 baseline, and bigger models are slower per step)", flush=True)
+
+    for c in configs:
+        for n_poison in args.n_poison_grid:
+            for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+                r = np.random.default_rng(900 + seed)
+                sched = spaced_or_spread(args.n_clean, n_poison, c["density"], c["batch"])
+                tag = f"th_{args.th_axis}_{c['tag']}"
+                try:
+                    model = train_model(args.n_clean, sched, bigram, r, d=c["d"],
+                                        n_layer=c["n_layer"], batch=c["batch"], lr=c["lr"],
+                                        torch_seed=seed)
+                    asr = attack_success_rate(model, trigger_id=TRIGGER_RARE)
+                    npar = sum(p.numel() for p in model.parameters())
+                    cl = model.final_loss
+                except Exception as e:
+                    print(f"[{tag}] N={n_poison:5d} seed={seed} ERROR: {e}", flush=True)
+                    continue
+                writer.writerow(dict(experiment=tag, density=c["density"], n_poison=n_poison,
+                                     n_clean=args.n_clean, seed=seed, asr=asr, dim=c["d"],
+                                     layers=c["n_layer"], n_params=npar, batch=c["batch"],
+                                     lr=c["lr"], clean_loss=round(cl, 4)))
+                f.flush()
+                print(f"[{tag}] N={n_poison:5d} seed={seed} asr={asr:.3f} "
+                      f"params={npar:,} clean_loss={cl:.3f}", flush=True)
+
+
+def spaced_or_spread(n_clean, n_poison, density, batch):
+    """spread_schedule, but with the per-batch cap taken from this config's batch size."""
+    if density > batch:
+        raise ValueError(f"density {density} exceeds batch {batch}")
+    return spread_schedule(n_clean, n_poison, density=density)
+
+
+def run_interference2_experiment(args, writer, f):
+    """Corrected test of Proposition 3's interference prediction.
+
+    The first attempt (--experiment beta2) was confounded: raising beta2 also raises the
+    per-event displacement D0(beta2) = (1-b1)/((1-b1/sqrt(b2))*sqrt(1-b2)), so a lower
+    attack success from interference and a higher one from a bigger step cancel. Two
+    changes fix it:
+
+      1. beta2 and the learning rate are applied to the TRIGGER'S EMBEDDING ROW ONLY
+         (its own optimiser group), so the clean network trains identically in every
+         cell. The row's learning rate is scaled as lr * D0(ref_beta2)/D0(beta2), which
+         holds the isolated-event displacement constant across beta2 by construction.
+         Any remaining beta2 effect is then interference, not step size. The matching
+         is VERIFIED rather than assumed: every run probes the trigger row across its
+         first poisoned event and records disp_step/disp_window, so the analysis can
+         check that the cells really are step-matched. A CPU check at d=32 found the
+         formula matches to within 4% for beta2 <= 0.99 but leaves beta2=0.999 about
+         14% low, so this column is load-bearing, not decorative.
+      2. beta2=0.9 (memory 10 steps) is included as a placement control: no spacing in
+         the grid falls inside its memory, so its trend across spacing is the pure
+         effect of the block landing earlier, which is subtracted from the others.
+
+    Prediction, fixed before running: with the step size matched, attack success falls as
+    span/memory drops below 1 -- so at fixed spacing, higher beta2 gives LOWER success,
+    and the beta2=0.9 row shows no such trend beyond its placement trend.
+    """
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    D0_ref = adam_event_displacement(0.9, args.ref_beta2)
+    cells = []
+    for b2 in args.beta2_grid:
+        trig_lr = args.lr * D0_ref / adam_event_displacement(0.9, b2)
+        for spacing in args.spacing_grid:
+            sched = spaced_block_schedule(args.n_clean, args.n_events, args.per_event,
+                                          spacing, end_frac=args.end_frac)
+            steps = [i for i, _ in sched]
+            assert len(set(steps)) == len(steps), f"b2={b2} spacing={spacing}: duplicate steps"
+            assert sum(k for _, k in sched) == args.n_events * args.per_event
+            cells.append((b2, trig_lr, spacing, sched))
+    total = len(cells) * args.seeds * args.n_clean
+    print(f"[interference2] preflight OK; {len(cells)} cells x {args.seeds} seeds; "
+          f"N={args.n_events * args.per_event} in {args.n_events} batches; "
+          f"trigger-row lr {min(c[1] for c in cells):.2e}-{max(c[1] for c in cells):.2e} "
+          f"(network lr fixed at {args.lr:g}); {total:,} total steps "
+          f"(~{total/37/3600:.1f} h at 37 steps/s)", flush=True)
+
+    for b2, trig_lr, spacing, sched in cells:
+        memory = 1.0 / (1.0 - b2)
+        span = (args.n_events - 1) * spacing
+        for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+            r = np.random.default_rng(1100 + seed)
+            tag = f"int2_b{b2:g}_s{spacing}"
+            first = sched[0][0]
+            try:
+                model = train_model(args.n_clean, sched, bigram, r, d=args.dim,
+                                    n_layer=args.layers, optimizer="adamw",
+                                    trigger_opt="adamw", trig_lr=trig_lr, trig_beta2=b2,
+                                    torch_seed=seed,
+                                    probe_steps=[first, first + 1,
+                                                 min(first + 40, args.n_clean - 1)])
+                asr = attack_success_rate(model, trigger_id=TRIGGER_RARE)
+                pl = model.probe_log
+                last_probe = min(first + 40, args.n_clean - 1)
+                d1 = float((pl[first + 1] - pl[first]).norm())
+                dw = float((pl[last_probe] - pl[first]).norm())
+            except Exception as e:
+                print(f"[{tag}] seed={seed} ERROR: {e}", flush=True)
+                continue
+            writer.writerow(dict(experiment=tag, density=args.per_event,
+                                 n_poison=args.n_events * args.per_event,
+                                 n_clean=args.n_clean, seed=seed, asr=asr, beta2=b2,
+                                 spacing=spacing, span_over_memory=round(span / memory, 4),
+                                 rest_opt="adamw", trigger_opt="adamw", lr=args.lr,
+                                 trig_lr=trig_lr, trig_beta2=b2, dim=args.dim,
+                                 layers=args.layers, disp_step=d1, disp_window=dw,
+                                 # equal across cells BY CONSTRUCTION: the matching
+                                 # target, in units of a unit gradient, not an absolute
+                                 # prediction of the measured displacement
+                                 pred_disp=trig_lr * adam_event_displacement(0.9, b2)))
+            f.flush()
+            print(f"[{tag}] seed={seed} asr={asr:.3f} span/memory={span/memory:.3f} "
+                  f"trig_lr={trig_lr:.2e} disp_window={dw:.6f}", flush=True)
+
+
 def run_embdisp_experiment(args, writer, f):
     """Direct test of Proposition 3 on the real transformer: how far does ONE poisoned
     batch move the trigger's own embedding row, as a function of how many poison examples
@@ -719,7 +911,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho",
                                               "placement", "events", "beta2", "paramgroup",
-                                              "lrscaling", "embdisp", "all"], default="schedule")
+                                              "lrscaling", "embdisp",
+                                              "threshold", "interference2", "all"], default="schedule")
     ap.add_argument("--events_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--per_event_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--optimizers", nargs="+", choices=["adamw", "sgd"], default=["adamw", "sgd"])
@@ -771,18 +964,37 @@ def main():
                           "adamw_trigadamw,adamw_trigsgd,sgd_trigadamw,sgd_trigsgd")
     ap.add_argument("--lr_grid", type=float, nargs="+", default=[3e-4, 1e-3, 3e-3],
                      help="lrscaling experiment: AdamW learning rates; Eq. 6 predicts N* ~ 1/lr")
+    ap.add_argument("--th_axis", choices=["modelsize", "density", "lr", "batch"],
+                     default="modelsize", help="threshold: which factor to sweep N* against")
+    ap.add_argument("--model_grid", nargs="+", default=["64:2", "128:4", "256:4", "512:8"],
+                     help="threshold/modelsize: width:layers specs")
+    ap.add_argument("--density_grid", type=int, nargs="+", default=[1, 4, 16],
+                     help="threshold/density: poison examples per poisoned batch")
+    ap.add_argument("--batch_grid", type=int, nargs="+", default=[32, 64, 128],
+                     help="threshold/batch: clean batch sizes")
+    ap.add_argument("--batch", type=int, default=64, help="clean batch size")
+    ap.add_argument("--lr", type=float, default=1e-3, help="network learning rate")
+    ap.add_argument("--ref_beta2", type=float, default=0.999,
+                     help="interference2: beta2 whose per-event displacement every cell is matched to")
+    ap.add_argument("--end_frac", type=float, default=0.8,
+                     help="interference2: fraction of training at which the LAST poisoned batch lands")
     ap.add_argument("--append", action="store_true",
                      help="append to --out instead of overwriting (and skip the header) -- "
                           "use when merging a rerun's results into an existing partial CSV")
     args = ap.parse_args()
 
     print(f"device={DEVICE}", flush=True)
+    if DEVICE == "cpu" and os.environ.get("ALLOW_CPU") != "1":
+        raise SystemExit("REFUSING to run on CPU: torch.cuda.is_available() is False. These jobs take days on CPU. "
+                         "Fix the torch/driver install (python pod/preflight.py), or set ALLOW_CPU=1 for a smoke test.")
     t0 = time.time()
     mode = "a" if args.append else "w"
     with open(args.out, mode, newline="") as f:
         fieldnames = ["experiment", "density", "n_poison", "n_clean", "seed", "asr",
                       "beta2", "spacing", "span_over_memory", "rest_opt", "trigger_opt", "lr",
-                      "disp_step", "disp_window", "pred_disp"]
+                      "disp_step", "disp_window", "pred_disp",
+                      "dim", "layers", "n_params", "batch", "trig_lr", "trig_beta2",
+                      "clean_loss"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         if not args.append:
             writer.writeheader()
@@ -804,6 +1016,10 @@ def main():
             run_paramgroup_experiment(args, writer, f)
         if args.experiment == "lrscaling":
             run_lrscaling_experiment(args, writer, f)
+        if args.experiment == "threshold":
+            run_threshold_experiment(args, writer, f)
+        if args.experiment == "interference2":
+            run_interference2_experiment(args, writer, f)
         if args.experiment == "embdisp":
             run_embdisp_experiment(args, writer, f)
     print(f"done in {time.time()-t0:.1f}s -> {args.out}")

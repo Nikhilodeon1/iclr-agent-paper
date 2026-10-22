@@ -226,3 +226,26 @@ Any of `results_*.csv` pasted into the chat or pushed to the repo. Each file is
 self-describing: the `experiment` column encodes the condition, and the new columns
 `beta2`, `spacing`, `span_over_memory`, `rest_opt`, `trigger_opt` and `lr` are populated
 only for the runs they apply to.
+
+---
+
+## Wave 2 and 3 (added after Wave 1)
+
+Defined in `pod/jobs.sh` and launched with `bash pod/launch.sh wave2` / `wave3`, so the
+commands are not repeated here — `jobs.sh` is the single source of truth for them and was
+dry-run through the real script with training stubbed (row counts verified: M1-M5 48 each,
+K1 168, K2 112, I 96, C 120, D 84, B2 360).
+
+| Job | Tests | Rows |
+|---|---|---|
+| M1-M4 | N* across 110K-25.3M parameters, the model-size axis the paper concedes it lacks | 48 each |
+| M5 | largest model at lr 3e-4: control against learning-rate confounding | 48 |
+| K1, K2 | N* vs per-batch density; Prop 3 predicts slope 1, example-counting predicts 0 | 168, 112 |
+| I | corrected interference test, replacing the failed Job A | 96 |
+| C | N* vs learning rate; Eq 4 predicts slope -1 | 120 |
+| D | AdamW vs SGD at matched difficulty, so neither arm sits at the floor | 84 |
+| B2 | paramgroup seeds 5-19, pooled to 20 per cell | 360 |
+
+Predictions and the decision rule for every outcome, including what counts as a failure,
+are fixed in `preregistered_predictions.md` under "Wave 2 predictions", written before any
+of these ran.

@@ -1,0 +1,98 @@
+
+######## C:/Users/nikhi/Codes/RES/src/iclr-agent-paper/results_wave/results_embdisp.csv  (80 rows, 5 seeds) ########
+== JOB H: trigger-row displacement per poisoned batch ==
+  opt  beta2  density  n  disp_step    pred  disp_window  ratio_to_pred  rel_to_k_min
+adamw  0.950        1  5    0.00502 0.00506      0.05952        0.99223       1.00000
+adamw  0.950        4  5    0.00505 0.00506      0.05994        0.99799       1.00581
+adamw  0.950       16  5    0.00506 0.00506      0.06010        1.00012       1.00795
+adamw  0.950       64  5    0.00506 0.00506      0.06011        1.00034       1.00817
+adamw  0.990        1  5    0.01115 0.01131      0.11097        0.98517       1.00000
+adamw  0.990        4  5    0.01126 0.01131      0.11222        0.99565       1.01064
+adamw  0.990       16  5    0.01130 0.01131      0.11255        0.99841       1.01343
+adamw  0.990       64  5    0.01131 0.01131      0.11278        1.00011       1.01517
+adamw  0.999        1  5    0.02761 0.02846      0.26596        0.97031       1.00000
+adamw  0.999        4  5    0.02820 0.02846      0.27165        0.99105       1.02138
+adamw  0.999       16  5    0.02837 0.02846      0.27331        0.99698       1.02749
+adamw  0.999       64  5    0.02843 0.02846      0.27384        0.99892       1.02949
+  sgd    NaN        1  5    0.00003     NaN      0.00031            NaN       1.00000
+  sgd    NaN        4  5    0.00013     NaN      0.00126            NaN       4.02611
+  sgd    NaN       16  5    0.00052     NaN      0.00497            NaN      15.86201
+  sgd    NaN       64  5    0.00208     NaN      0.01992            NaN      63.57322
+
+AdamW: disp_step ~flat across k and ratio_to_pred ~1 supports the premise. SGD: rel_to_k_min should grow ~ in proportion to k.
+
+######## C:/Users/nikhi/Codes/RES/src/iclr-agent-paper/results_wave/results_beta2.csv  (90 rows, 10 seeds) ########
+== JOB A: beta2 x spacing (total poison identical in every cell) ==
+ beta2  spacing  n  succ   lo   hi  mean_asr  span/memory
+ 0.950       10 10     9 0.60 0.98     0.818         4.00
+ 0.950       50 10     8 0.49 0.94     0.826        20.00
+ 0.950      250 10     5 0.24 0.76     0.560       100.00
+ 0.990       10 10     9 0.60 0.98     0.790         0.80
+ 0.990       50 10     8 0.49 0.94     0.800         4.00
+ 0.990      250 10     6 0.31 0.83     0.584        20.00
+ 0.999       10 10     9 0.60 0.98     0.860         0.08
+ 0.999       50 10     9 0.60 0.98     0.868         0.40
+ 0.999      250 10     7 0.40 0.89     0.692         2.00
+
+Contrast across beta2 WITHIN each spacing (placement identical by construction):
+  spacing 10: beta2=0.95 mean 0.818 vs beta2=0.999 mean 0.861, two-sided MW p=0.269
+  spacing 50: beta2=0.95 mean 0.826 vs beta2=0.999 mean 0.868, two-sided MW p=0.17
+  spacing 250: beta2=0.95 mean 0.560 vs beta2=0.999 mean 0.692, two-sided MW p=0.517
+
+Pooled Spearman(span/memory, ASR) = -0.262 (p=0.0126); pooled across spacings, so placement-confounded. Contrasts examined: 3
+
+######## C:/Users/nikhi/Codes/RES/src/iclr-agent-paper/results_wave/results_paramgroup.csv  (120 rows, 5 seeds) ########
+== JOB B: per-parameter-group optimizer test ==
+            cond  n_poison  E  n  succ   lo   hi  mean_asr
+adamw/trig-adamw        16  1  5     2 0.12 0.77     0.369
+adamw/trig-adamw        16  4  5     3 0.23 0.88     0.662
+adamw/trig-adamw        16 16  5     5 0.57 1.00     0.881
+adamw/trig-adamw        32  1  5     5 0.57 1.00     0.902
+adamw/trig-adamw        32  4  5     5 0.57 1.00     0.982
+adamw/trig-adamw        32 16  5     5 0.57 1.00     0.998
+ adamw/trig-none        16  1  5     2 0.12 0.77     0.369
+ adamw/trig-none        16  4  5     3 0.23 0.88     0.686
+ adamw/trig-none        16 16  5     5 0.57 1.00     0.881
+ adamw/trig-none        32  1  5     5 0.57 1.00     0.902
+ adamw/trig-none        32  4  5     5 0.57 1.00     0.986
+ adamw/trig-none        32 16  5     5 0.57 1.00     0.998
+  adamw/trig-sgd        16  1  5     1 0.04 0.62     0.271
+  adamw/trig-sgd        16  4  5     3 0.23 0.88     0.527
+  adamw/trig-sgd        16 16  5     3 0.23 0.88     0.554
+  adamw/trig-sgd        32  1  5     5 0.57 1.00     0.892
+  adamw/trig-sgd        32  4  5     5 0.57 1.00     0.969
+  adamw/trig-sgd        32 16  5     5 0.57 1.00     0.990
+  sgd/trig-adamw        16  1  5     1 0.04 0.62     0.110
+  sgd/trig-adamw        16  4  5     1 0.04 0.62     0.197
+  sgd/trig-adamw        16 16  5     3 0.23 0.88     0.490
+  sgd/trig-adamw        32  1  5     1 0.04 0.62     0.193
+  sgd/trig-adamw        32  4  5     1 0.04 0.62     0.280
+  sgd/trig-adamw        32 16  5     3 0.23 0.88     0.632
+
+Batch-count contrast (E=1 vs max E) per condition and total; success counts via Fisher, ASR via MW:
+  adamw/trig-adamw       N= 16: E=1 2/5 -> E=16 5/5  Fisher p=0.167  MW p=0.0339
+  adamw/trig-adamw       N= 32: E=1 5/5 -> E=16 5/5  Fisher p=1  MW p=0.441
+  adamw/trig-none        N= 16: E=1 2/5 -> E=16 5/5  Fisher p=0.167  MW p=0.0339
+  adamw/trig-none        N= 32: E=1 5/5 -> E=16 5/5  Fisher p=1  MW p=0.441
+  adamw/trig-sgd         N= 16: E=1 1/5 -> E=16 3/5  Fisher p=0.524  MW p=0.421
+  adamw/trig-sgd         N= 32: E=1 5/5 -> E=16 5/5  Fisher p=1  MW p=0.724
+  sgd/trig-adamw         N= 16: E=1 1/5 -> E=16 3/5  Fisher p=0.524  MW p=0.119
+  sgd/trig-adamw         N= 32: E=1 1/5 -> E=16 3/5  Fisher p=0.524  MW p=0.16
+
+Contrasts examined: 8 (no multiplicity correction applied).
+CHECK FIRST: does 'adamw/trig-none' (unsplit control) agree with 'adamw/trig-adamw'? If not, the split changed the dynamics.
+
+######## C:/Users/nikhi/Codes/RES/src/iclr-agent-paper/results_wave/results_events_20seed.csv  (120 rows, 20 seeds) ########
+== EVENTS: AdamW vs SGD, success counts with Wilson intervals ==
+  opt  n_poison  E  n  succ   lo   hi  mean_asr
+adamw        16  1 20     5 0.11 0.47     0.218
+adamw        16  4 20    11 0.34 0.74     0.511
+adamw        16 16 20    13 0.43 0.82     0.673
+  sgd        16  1 20     1 0.01 0.24     0.050
+  sgd        16  4 20     1 0.01 0.24     0.050
+  sgd        16 16 20     1 0.01 0.24     0.050
+
+Contrast E=min vs E=max within optimizer and N:
+  adamw  N= 16: E=1 5/20 -> E=16 13/20 Fisher p=0.0248
+  sgd    N= 16: E=1 1/20 -> E=16 1/20 Fisher p=1
+Contrasts examined: 2 (uncorrected).
