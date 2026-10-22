@@ -16,5 +16,16 @@ start() {
   ( cd "$EXP_DIR"; nohup python validate_transformer.py $args > "$LOG_DIR/$j.log" 2>&1 & echo $! > "$LOG_DIR/$j.pid" )   # $! must be python's pid
   echo "started job $j  log: $LOG_DIR/$j.log"
 }
-[ $# -ge 1 ] || { echo "usage: launch.sh wave1 | <letter>..."; exit 1; }
-if [ "$1" = "wave1" ]; then for j in $WAVE1; do start "$j" || true; done; else for j in "$@"; do start "$j" || true; done; fi
+[ $# -ge 1 ] || { echo "usage: launch.sh wave1|wave2|wave3 | <letter>..."; exit 1; }
+# expand any waveN argument into its job letters (WAVE1/WAVE2/... in jobs.sh)
+expand() {
+  case "$1" in
+    wave[0-9]*) local v="WAVE${1#wave}"; local jl="${!v:-}"
+                [ -n "$jl" ] || { echo "unknown wave $1 (no $v in pod/jobs.sh)"; return 1; }
+                echo "$jl" ;;
+    *) echo "$1" ;;
+  esac
+}
+for a in "$@"; do
+  for j in $(expand "$a"); do start "$j" || true; done
+done
