@@ -671,6 +671,36 @@ def run_lrscaling_experiment(args, writer, f):
                 print(f"[{tag}] N={N:5d} seed={seed} asr={asr:.3f}", flush=True)
 
 
+def load_done_cells(path):
+    """Resume support: drop a half-written trailing row, then return
+    (header, {(experiment, n_poison, seed), ...}) for every complete row.
+
+    Rows are flushed one at a time, so a killed job leaves complete rows plus at most one
+    truncated line. A truncated line would give pandas a wrong field count, so it is
+    removed here before anything is appended."""
+    with open(path, newline="") as fh:
+        text = fh.read()
+    lines = text.split("\n")
+    header = next(csv.reader([lines[0]]))
+    keep, done = [lines[0]], set()
+    for ln in lines[1:]:
+        if not ln.strip():
+            continue
+        row = next(csv.reader([ln]))
+        if len(row) != len(header):
+            continue
+        d = dict(zip(header, row))
+        try:
+            float(d["asr"])
+            done.add((d["experiment"], int(float(d["n_poison"])), int(float(d["seed"]))))
+        except (ValueError, KeyError):
+            continue
+        keep.append(ln)
+    with open(path, "w", newline="") as fh:
+        fh.write("\n".join(keep) + "\n")
+    return header, done
+
+
 def run_threshold_experiment(args, writer, f):
     """Poison count needed for attack success, swept finely in N so the 50% threshold
     N* can be interpolated, while ONE factor varies.
@@ -733,6 +763,8 @@ def run_threshold_experiment(args, writer, f):
                 r = np.random.default_rng(900 + seed)
                 sched = spaced_or_spread(args.n_clean, n_poison, c["density"], c["batch"])
                 tag = f"th_{args.th_axis}_{c['tag']}"
+                if (tag, n_poison, seed) in args.done_keys:
+                    continue
                 try:
                     model = train_model(args.n_clean, sched, bigram, r, d=c["d"],
                                         n_layer=c["n_layer"], batch=c["batch"], lr=c["lr"],
@@ -811,6 +843,8 @@ def run_interference2_experiment(args, writer, f):
         for seed in range(args.seed_offset, args.seed_offset + args.seeds):
             r = np.random.default_rng(1100 + seed)
             tag = f"int2_b{b2:g}_s{spacing}"
+            if (tag, args.n_events * args.per_event, seed) in args.done_keys:
+                continue
             first = sched[0][0]
             try:
                 model = train_model(args.n_clean, sched, bigram, r, d=args.dim,
@@ -978,6 +1012,9 @@ def main():
                      help="interference2: beta2 whose per-event displacement every cell is matched to")
     ap.add_argument("--end_frac", type=float, default=0.8,
                      help="interference2: fraction of training at which the LAST poisoned batch lands")
+    ap.add_argument("--resume", action="store_true",
+                     help="threshold/interference2 only: continue an existing CSV, skipping "
+                          "cells (experiment, n_poison, seed) it already holds")
     ap.add_argument("--append", action="store_true",
                      help="append to --out instead of overwriting (and skip the header) -- "
                           "use when merging a rerun's results into an existing partial CSV")
@@ -988,6 +1025,16 @@ def main():
         raise SystemExit("REFUSING to run on CPU: torch.cuda.is_available() is False. These jobs take days on CPU. "
                          "Fix the torch/driver install (python pod/preflight.py), or set ALLOW_CPU=1 for a smoke test.")
     t0 = time.time()
+    args.done_keys = set()
+    resume_header = None
+    if args.resume:
+        if args.experiment not in ("threshold", "interference2"):
+            raise SystemExit("--resume is only supported for --experiment threshold/interference2; "
+                             "other modes have no skip logic and would write duplicate rows")
+        if os.path.exists(args.out) and os.path.getsize(args.out) > 0:
+            resume_header, args.done_keys = load_done_cells(args.out)
+            args.append = True
+            print(f"resume: {len(args.done_keys)} complete cells found in {args.out}", flush=True)
     mode = "a" if args.append else "w"
     with open(args.out, mode, newline="") as f:
         fieldnames = ["experiment", "density", "n_poison", "n_clean", "seed", "asr",
@@ -996,6 +1043,8 @@ def main():
                       "dim", "layers", "n_params", "batch", "trig_lr", "trig_beta2",
                       "clean_loss"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if resume_header is not None and resume_header != fieldnames:
+            raise SystemExit(f"cannot resume: header of {args.out} differs from this script's columns")
         if not args.append:
             writer.writeheader()
         if args.experiment in ("calibrate", "all"):
