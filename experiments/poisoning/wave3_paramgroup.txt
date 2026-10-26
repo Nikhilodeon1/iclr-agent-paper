@@ -1,0 +1,41 @@
+
+######## results_paramgroup_pooled.csv  (480 rows, 20 seeds) ########
+== JOB B: per-parameter-group optimizer test ==
+            cond  n_poison  E  n  succ   lo   hi  mean_asr
+adamw/trig-adamw        16  1 20     5 0.11 0.47     0.234
+adamw/trig-adamw        16  4 20     9 0.26 0.66     0.507
+adamw/trig-adamw        16 16 20    15 0.53 0.89     0.698
+adamw/trig-adamw        32  1 20    11 0.34 0.74     0.546
+adamw/trig-adamw        32  4 20    17 0.64 0.95     0.812
+adamw/trig-adamw        32 16 20    17 0.64 0.95     0.898
+ adamw/trig-none        16  1 20     5 0.11 0.47     0.234
+ adamw/trig-none        16  4 20    10 0.30 0.70     0.511
+ adamw/trig-none        16 16 20    15 0.53 0.89     0.698
+ adamw/trig-none        32  1 20    11 0.34 0.74     0.546
+ adamw/trig-none        32  4 20    17 0.64 0.95     0.809
+ adamw/trig-none        32 16 20    17 0.64 0.95     0.898
+  adamw/trig-sgd        16  1 20     3 0.05 0.36     0.173
+  adamw/trig-sgd        16  4 20     7 0.18 0.57     0.342
+  adamw/trig-sgd        16 16 20     7 0.18 0.57     0.338
+  adamw/trig-sgd        32  1 20    11 0.34 0.74     0.508
+  adamw/trig-sgd        32  4 20    16 0.58 0.92     0.772
+  adamw/trig-sgd        32 16 20    17 0.64 0.95     0.821
+  sgd/trig-adamw        16  1 20     2 0.03 0.30     0.099
+  sgd/trig-adamw        16  4 20     3 0.05 0.36     0.158
+  sgd/trig-adamw        16 16 20     9 0.26 0.66     0.412
+  sgd/trig-adamw        32  1 20     3 0.05 0.36     0.146
+  sgd/trig-adamw        32  4 20     5 0.11 0.47     0.253
+  sgd/trig-adamw        32 16 20    10 0.30 0.70     0.521
+
+Batch-count contrast (E=1 vs max E) per condition and total; success counts via Fisher, ASR via MW:
+  adamw/trig-adamw       N= 16: E=1 5/20 -> E=16 15/20  Fisher p=0.00385  MW p=0.000353
+  adamw/trig-adamw       N= 32: E=1 11/20 -> E=16 17/20  Fisher p=0.0824  MW p=0.00104
+  adamw/trig-none        N= 16: E=1 5/20 -> E=16 15/20  Fisher p=0.00385  MW p=0.000353
+  adamw/trig-none        N= 32: E=1 11/20 -> E=16 17/20  Fisher p=0.0824  MW p=0.00104
+  adamw/trig-sgd         N= 16: E=1 3/20 -> E=16 7/20  Fisher p=0.273  MW p=0.18
+  adamw/trig-sgd         N= 32: E=1 11/20 -> E=16 17/20  Fisher p=0.0824  MW p=0.0157
+  sgd/trig-adamw         N= 16: E=1 2/20 -> E=16 9/20  Fisher p=0.031  MW p=0.00236
+  sgd/trig-adamw         N= 32: E=1 3/20 -> E=16 10/20  Fisher p=0.0407  MW p=0.00357
+
+Contrasts examined: 8 (no multiplicity correction applied).
+CHECK FIRST: does 'adamw/trig-none' (unsplit control) agree with 'adamw/trig-adamw'? If not, the split changed the dynamics.

@@ -325,7 +325,8 @@ def run_dataset_size_experiment(args, writer, f):
             for seed in range(args.seed_offset, args.seed_offset + args.seeds):
                 r = np.random.default_rng(200 + seed)
                 sched = spread_schedule(n_clean, args.n_poison, density=4)
-                tag = "dataset_size" if len(args.optimizers) == 1 and opt_name == "adamw" \
+                tag = "dataset_size" if (len(args.optimizers) == 1 and opt_name == "adamw"
+                                         and args.weight_decay == 0.01) \
                       else f"dataset_size_{opt_name}_wd{args.weight_decay}"
                 try:
                     model = train_model(n_clean, sched, bigram, r, d=args.dim, n_layer=args.layers,

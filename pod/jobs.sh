@@ -26,3 +26,16 @@ JOB_I="results_interference2.csv|96|--experiment interference2 --out results_int
 JOB_B2="results_paramgroup_topup.csv|360|--experiment paramgroup --out results_paramgroup_topup.csv --dim 128 --layers 4 --seed_offset 5 --seeds 15 --n_clean 3000 --sgd_lr 0.1 --pg_totals 16 32 --events_grid 1 4 16 --paramgroup_conditions adamw_trignone,adamw_trigadamw,adamw_trigsgd,sgd_trigadamw"
 WAVE2="M1 M2 M3 M4 M5 K1 K2"
 WAVE3="I C D B2"
+
+# ---- Wave 4: Job F (training-length sweep) and Job G (Pythia on natural text) ----
+# F1/F2: Proposition 1 under SGD, at budgets where SGD is off the floor (N=16 is floor under SGD).
+JOB_F1="results_ds_sgd_n64.csv|32|--experiment dataset_size --out results_ds_sgd_n64.csv --dim 128 --layers 4 --seeds 8 --n_poison 64 --sgd_lr 0.1 --optimizers sgd --n_clean_grid 500 2000 8000 32000"
+JOB_F2="results_ds_sgd_n128.csv|32|--experiment dataset_size --out results_ds_sgd_n128.csv --dim 128 --layers 4 --seeds 8 --n_poison 128 --sgd_lr 0.1 --optimizers sgd --n_clean_grid 500 2000 8000 32000"
+# F3: AdamW with weight decay 0. F4: the SAME seeded sweep with the default decay 0.01, so F3 has a fair control.
+JOB_F3="results_ds_wd0.csv|32|--experiment dataset_size --out results_ds_wd0.csv --dim 128 --layers 4 --seeds 8 --n_poison 16 --optimizers adamw --weight_decay 0 --n_clean_grid 500 2000 8000 32000"
+JOB_F4="results_ds_ctrl.csv|32|--experiment dataset_size --out results_ds_ctrl.csv --dim 128 --layers 4 --seeds 8 --n_poison 16 --optimizers adamw --weight_decay 0.01 --n_clean_grid 500 2000 8000 32000"
+# GS: 2-row smoke test of the Pythia script (run first). G: the full 4-trigger x 5-count x 5-seed run.
+# "REALTEXT " prefix makes launch.sh use validate_realtext.py. Needs: bash pod/add_hf.sh
+JOB_GS="results_smoke_rt.csv|2|REALTEXT --experiment frequency --out results_smoke_rt.csv --max_tokens 200000 --n_steps 200 --seeds 1 --batch 8 --seq_len 128 --freq_targets 0 --n_poison_grid 16 256"
+JOB_G="results_realtext_5seed.csv|100|REALTEXT --experiment frequency --out results_realtext_5seed.csv --n_steps 600 --seeds 5 --freq_targets 0 0.05 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+WAVE4="F1 F2 F3 F4"

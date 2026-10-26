@@ -1,0 +1,9 @@
+
+######## C:/Users/nikhi/Codes/RES/src/iclr-agent-paper/results_wave3/results_lrscaling.csv  (120 rows, 5 seeds) ########
+== JOB C: learning-rate scaling (Eq. budget predicts N* ~ 1/lr; counting predicts no dependence) ==
+    lr  N50  ci_lo  ci_hi  n_boot_ok  seeds
+0.0003 52.6   39.4   81.8        500      5
+0.0010 15.8   12.1   22.2        500      5
+0.0030 39.2   13.3   83.4        500      5
+
+log-log slope of N50 vs lr = -0.14 (theory: -1; frequency counting: 0). Descriptive: 3 learning rates.

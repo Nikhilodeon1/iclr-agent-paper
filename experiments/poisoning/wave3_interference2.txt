@@ -1,0 +1,28 @@
+
+######## C:/Users/nikhi/Codes/RES/src/iclr-agent-paper/results_wave3/results_interference2.csv  (96 rows, 8 seeds) ########
+== INTERFERENCE (corrected: trigger-row lr compensated, events placed late) ==
+Step-matching check -- disp_step/disp_window should be comparable across beta2
+within a spacing; pred_disp is identical by construction.
+ beta2  spacing  n  succ  mean_asr  span_mem  trig_lr  disp_step  disp_window
+   0.9       10  8     6    0.7169         7 0.005155    0.01843       0.3622
+   0.9       50  8     7    0.8706        35 0.005155    0.01842       0.3146
+   0.9      250  8     6    0.7969       175 0.005155    0.01842       0.3148
+  0.95       10  8     6    0.7025       3.5 0.005442     0.0275       0.4232
+  0.95       50  8     6    0.7856      17.5 0.005442    0.02748       0.3436
+  0.95      250  8     6    0.7175      87.5 0.005442    0.02749       0.3436
+  0.99       10  8     6    0.7425       0.7 0.003033    0.03418       0.4288
+  0.99       50  8     7    0.8431       3.5 0.003033    0.03415       0.3512
+  0.99      250  8     7    0.8087      17.5 0.003033    0.03417       0.3511
+ 0.999       10  8     6      0.72      0.07    0.001    0.03546       0.4156
+ 0.999       50  8     5    0.6562      0.35    0.001    0.03542       0.3504
+ 0.999      250  8     6    0.7388      1.75    0.001    0.03529       0.3491
+
+Contrast across beta2 WITHIN each spacing (placement identical by construction):
+  spacing   10: beta2=0.9 mean 0.717 (span/mem 7.00) vs beta2=0.999 mean 0.720 (span/mem 0.07), two-sided MW p=0.833
+  spacing   50: beta2=0.9 mean 0.871 (span/mem 35.00) vs beta2=0.999 mean 0.656 (span/mem 0.35), two-sided MW p=0.204
+  spacing  250: beta2=0.9 mean 0.797 (span/mem 175.00) vs beta2=0.999 mean 0.739 (span/mem 1.75), two-sided MW p=0.708
+
+PREDICTION (fixed in advance): with step size matched, ASR falls as span/memory drops below 1, so higher beta2 gives LOWER ASR at fixed spacing. The beta2=0.9 row has span/memory > 1 everywhere and is the placement control: its trend across spacing is placement alone and should be subtracted.
+  placement control (beta2=0.9) mean ASR across spacing: s10=0.717, s50=0.871, s250=0.797
+  cells genuinely inside the interference window (span/memory < 1): 3 of 12
+  measured disp_window by beta2: 0.9:0.3306, 0.95:0.3702, 0.99:0.3770, 0.999:0.3717  (max/min = 1.14x; if this is large the cells are NOT step-matched and the beta2 contrast is confounded again)

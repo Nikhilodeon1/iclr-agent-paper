@@ -53,6 +53,26 @@ M1 M2 M3 K1 first and the rest when they finish.
 model is badly tuned at lr 1e-3 and the comparison is confounded — tell me and I'll adjust
 before you spend more time. (M5 is the control for exactly this.)
 
+
+## Wave 4 (Jobs F and G)
+
+```
+cd ~/iclr-agent-paper && git pull && . pod/env.sh
+bash pod/add_hf.sh                  # installs transformers + datasets into the EXISTING env (Job G only)
+bash pod/launch.sh wave4            # F1 F2 F3 F4  (32 rows each)
+bash pod/launch.sh GS               # 2-row Pythia smoke test, a few minutes
+python pod/status.py
+```
+**Check the smoke test before starting G:** `cat experiments/poisoning/results_smoke_rt.csv` must show 2 rows with a finite
+`clean_loss`, and a higher `asr` at `n_poison` 256 than at 16. If it errors, paste the traceback and do not start G.
+```
+bash pod/launch.sh G                # 100 rows; not resumable, so do not kill it
+```
+Time G from the smoke test: it ran 400 steps, so G's rate is `400 / GS elapsed seconds`, and G is 60,000 steps.
+
+Send back: `results_ds_sgd_n64.csv`, `results_ds_sgd_n128.csv`, `results_ds_wd0.csv`, `results_ds_ctrl.csv`, `results_realtext_5seed.csv`.
+Run `bash pod/pack_results.sh` for all of them. A `DONE` after about a second means every cell was already present, not that it ran.
+
 ## 3. Check progress
 ```
 python pod/status.py             # state, rows done/expected, errors, ETA, last log line, GPU, RAM

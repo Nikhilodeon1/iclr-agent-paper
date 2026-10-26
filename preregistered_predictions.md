@@ -153,3 +153,100 @@ in a 12,000-step run so Adam's bias correction is negligible. span/memory spans 
 ## Not predicted, and not to be presented as a prediction
 The threshold/batch axis is exploratory; no proposition predicts it. It is not in any
 wave and should only be run as a curiosity.
+
+
+---
+# Wave 2 outcomes, part 1 (appended 2026-10-25 22:39 UTC: model size M1-M5, density K1-K2)
+Wave 3 files (I, C, D, B2) were 0 bytes when packed: jobs started, no rows yet. Not analysed.
+All seven files complete, no duplicates, no NaN ASR. M2 and M3 and some of M1/M4/M5/K1/K2 came from earlier runs
+on other GPUs; each cell is an independent run, pooled by cell (the resume logic skips existing cells).
+
+| Job | Prediction | Outcome | Verdict |
+|---|---|---|---|
+| M1-M5 model size | N* flat, |slope| < 0.15 across 110K-25.3M params | N* = 12.7 [10.0,18.8], 11.5 [10.4,12.6], 11.6 [9.4,14.9] at 0.8M, 3.2M, 25M (31x): slope -0.022 [-0.147, 0.079]. **110K model: N* > 64** (mean ASR 0.46 at N=64, 5/8 seeds > 0.5), >5x the others; including it as a lower bound gives slope <= -0.30 | **Supported from 0.8M to 25M; fails at 0.11M** |
+| M4 (25M, lr 1e-3) | clean_loss comparable across sizes | clean loss 4.147 vs 3.71-3.73 elsewhere; ln(65) = 4.17, so it barely learned the clean task; ASR 0 at every N | **Excluded by the guard**; M5 (lr 3e-4, loss 3.71) used instead |
+| K1-K2 density | slope 1 supports (0.8-1.2); 0 if examples count; 0.3-0.8 partial | N* = 7.0, 9.4, 11.8, 14.7, 23.8 at k = 1,2,4,8,16; slope 0.418 [0.234, 0.546]; excludes both 1 and 0; poisoned batches needed falls 7.0 -> 1.5 | **Partial support** (rule: both channels contribute) |
+
+## Flaws in our own setup (disclosed)
+- The guard threshold written in the Wave 2 notes ("above ~4.5 when M1 is near 3.2") was miscalibrated: the real baseline is 3.72, so the
+  guard would NOT have fired at 4.147. The exclusion is justified instead by M4 being 0.43 nats above every other cell (spread among
+  them 0.02) and within 0.03 of the uniform-guess loss. Stated in the paper as such.
+- The 25M point (M5) differs in learning rate from the others (3e-4 vs 1e-3). Whether N* depends on lr at this size is untested until Job C.
+- The slope is over three non-censored sizes; the 110K cell is censored and the slope ignores it by construction. The invariance claim is
+  therefore restricted to >= 0.8M parameters in the paper.
+- Density N* at k=16 is coarse: it interpolates N=16 (one batch, ASR 0.01) and N=32 (ASR 0.86).
+- The density result is not a test of the two-channel account in particular: any mixture of the channels gives a slope between 0 and 1.
+- 8 seeds per cell, two-sided uncorrected bootstrap intervals, N grid in powers of 2.
+
+
+---
+# Wave 2 outcomes, part 2 (appended 2026-10-26 03:33 UTC: Jobs I, C, D, B2 from results_wave3)
+All four files complete (I 96, C 120, D 84, B2 360), no duplicates, no NaN ASR, each nonempty when previously 0 bytes (computed this run).
+
+| Job | Prediction | Outcome | Verdict |
+|---|---|---|---|
+| I (step-matched interference) | with step matched, ASR falls as span/memory < 1, so higher beta2 gives lower ASR; validity gate disp_window max/min < 1.3 | gate PASSES (1.14x). In-window cells mean ASR 0.706 vs 0.776 outside (diff -0.069, one-sided MW p=0.16). beta2 0.9->0.999 change: +0.003 / -0.214 / -0.058 at spacing 10/50/250 (p=0.83/0.20/0.71). ASR mid-range (0.66-0.87) everywhere | **Not supported; rule says withdraw the prediction** |
+| C (learning rate) | slope -1 (accept -0.7 to -1.3); 0 if counting | N* = 52.6 [39.4,81.8], 15.8 [12.1,22.2], 39.2 [13.3,83.4] at lr 3e-4,1e-3,3e-3: slope -0.14. Non-monotone: first two points fall 3.3x for 3.3x lr, third reverses | **Not supported as global slope** |
+| D (same-budget AdamW vs SGD) | AdamW rises with E, SGD does not, at matched difficulty | AdamW 6/6 at every E for N=64 and 128 (ceiling, uninformative). SGD flat: N=64 mean ASR 0.25/0.30/0.32/0.33 at E=1/2/4/16, N=128 0.83 at every E, and per seed identical across E (seed 0 fails throughout) | **SGD half supported; AdamW half uninformative; budgets not matched** |
+| B2 (20 seeds, pooled with Wave 1) | trig-adamw separates from trig-sgd at N=16 | N=16: row on AdamW 5/20 -> 15/20 (Fisher p=0.004); row on SGD 3/20 -> 7/20 (p=0.27); arms at E=16: 15/20 vs 7/20 (p=0.025); rise in mean ASR +0.46 vs +0.17 (MW p=0.003). sgd/trig-adamw: 2/20 -> 9/20 (p=0.031). N=32: arms at ceiling (17/20 both), uninformative | **Supported at N=16** |
+
+## Flaws in our own setup (disclosed in the paper)
+- D: I chose N=64/128 although Wave 1 already showed AdamW at ~0.98 at N=64 with one batch. Predictable from existing data; the AdamW arm is at ceiling.
+- I: single-step displacement after the first event differs up to 1.9x across beta2 (0.018 to 0.035); only the 40-step window quantity was gated (1.14x). The window gate was the one pre-specified.
+- I: 8 seeds cannot exclude a moderate effect (spacing-50 change -0.21, p=0.20).
+- C: clean_loss was not recorded in lrscaling mode, so the lr=3e-3 reversal cannot be attributed to failed training; the two-point agreement was noticed after seeing the third.
+- C: 5 seeds, 3 learning rates.
+- B2: seeds 0-4 and 5-19 ran on different GPUs; pooled by cell. Contrasts uncorrected (8 for B2).
+
+
+---
+# Wave 4 predictions (fixed 2026-10-26 04:06 UTC, BEFORE any Wave 4 job ran)
+
+Jobs F1-F4 (training-length sweep) and G (Pythia on natural text). Commands dry-run through the real scripts with
+training stubbed: F1-F4 give 32 rows each with the intended optimizer, weight decay and N; G gives 100 rows over four
+triggers at corpus frequencies 0 / 0.05 / 0.2 / 0.5 per step (trigger ids 741, 5110, 2159, 1142). Not run: the shell launcher
+edit and `pod/add_hf.sh` (bash is unavailable here).
+
+## Changes from the earlier sheet, and why
+- The sheet's SGD sweep used N=16. SGD succeeded in 1 of 20 runs at N=16 in Job E, so it would sit at floor at every length.
+  F1/F2 use N=64 and N=128, where Job D put SGD in mid-range (mean ASR 0.25-0.33 and 0.83 at T=3,000, a different schedule).
+  Whether SGD is mid-range under THIS schedule (spread_schedule, density 4) is untested; a floor or ceiling result is therefore
+  possible and is declared uninformative below.
+- The sheet's weight-decay sweep had no control. F3 (decay 0) is compared with F4 (decay 0.01), run with the same seeded
+  code path and seeds 0-7. The older unseeded sweep is NOT used as the control.
+- Eight seeds per cell, not five. Outcomes are bimodal per seed, so 5 is thin.
+
+## Baseline curve, AdamW, N=16 (earlier unseeded runs, pooled)
+Mean ASR by T: 500: 0.03-0.14, 2,000: 0.40-0.60, 8,000: 0.41-0.62, 32,000: 0.14-0.25, 64,000: 0.13. Peak at 2,000-8,000,
+a decline of roughly 50-75% by 32,000. The paper's decay simulation (decoupled weight decay) predicts only a 17% decline.
+
+## F1, F2: Proposition 1 under SGD
+Proposition 1 (count regime, rho=0, no clean pull on the trigger) predicts N* independent of clean-data size, so ASR at fixed N
+is flat in T once training is long enough to have learned the clean task.
+- **Validity first:** a cell set is informative only if at least one length has mean ASR in [0.15, 0.85]. Otherwise report
+  "uninformative (floor/ceiling)" and do not interpret.
+- **Prediction:** mean ASR at T=32,000 is within 0.15 of the mean at T=8,000 (no decline). T=500 may be lower (undertrained).
+- **If ASR at 32,000 is more than 0.25 below ASR at 8,000 and the intervals separate:** the decline is not specific to Adam, so
+  Proposition 1's invariance fails at the network level under its own optimizer. Report it, and state the window limit as general.
+- **Between 0.15 and 0.25:** report as a modest decline, inconclusive.
+- If SGD is flat while AdamW (F4) declines: the decline is optimizer-specific, consistent with the paper's Adam account.
+
+## F3 vs F4: is decoupled weight decay behind the decline (AdamW, N=16)
+Define D = 1 - ASR(T=32,000) / max(ASR(2,000), ASR(8,000)) for each arm.
+- **Prediction (from the paper's simulation):** weight decay accounts for the direction but not the size, so D(F3) < D(F4), but
+  by less than the whole decline. I predict D(F4) between 0.4 and 0.8 (as in the baseline) and D(F3) lower.
+- **Weight decay is a main driver** if D(F3) <= 0.5 x D(F4) AND ASR(32,000) is higher in F3 by at least 0.20 (one-sided Mann-Whitney p < 0.05).
+- **The weight-decay account is wrong as the main explanation** if D(F3) is within 0.25 of D(F4): the paper must then say the
+  decline is not explained by weight decay (shared-parameter drift remains a hypothesis only).
+- **Anything between:** partial; report both D values and the test.
+- The F4 control must reproduce a decline (D(F4) > 0.25); if not, the baseline curve did not replicate and F3 cannot be read.
+
+## G: Pythia-70M on natural text, 5 seeds, 4 frequencies
+Earlier 2-seed N50: rare 8.8, f=0.05: 30.7 (1.02x its clean-use count), f=0.2: 43.9 (0.37x). f=0.5 was unfinished.
+Proposition 2 predicts N* equal to the expected number of clean uses of the trigger: 0, 30, 120, 300 at T=600.
+- **Primary (ordering):** N50 is strictly increasing across the four levels. Supported if so; fails if any adjacent pair reverses.
+- **Secondary (proportionality):** log-log slope of N50 against expected clean uses over the three non-zero levels,
+  accepted range 0.7-1.3. **I expect this to fail**: the earlier two nonzero points give a slope of about 0.26. If it fails the
+  paper keeps the ordering claim only and reports the sublinearity as unexplained.
+- A cell where N50 is censored (never crosses 0.5 within the grid, max 1,024) is reported as censored, not interpolated.
+- Frequency is still measured on WikiText-2, not on the Pile Pythia was pretrained on (G2 would address this; not run).

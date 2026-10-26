@@ -139,9 +139,28 @@ def events(df):
 
 
 def f_dataset(df):
+    """Training-length sweep: per-length success counts, validity check, decline fraction D."""
     print("== DATASET SIZE / TRAINING LENGTH ==")
-    print(summarise(df, ["experiment", "n_clean"]).to_string(index=False))
-    print("Compare tags: SGD tag tests Proposition 1 under the optimizer it assumes; wd0 tag tests the weight-decay account.")
+    for tag, g in df.groupby("experiment"):
+        N = int(g.n_poison.iloc[0])
+        t = g.groupby("n_clean").agg(n=("asr", "size"), succ=("asr", lambda s: int((s > 0.5).sum())),
+                                      mean=("asr", "mean")).round(3)
+        print(f"-- {tag}  (N={N})"); print(t.to_string())
+        m = g.groupby("n_clean").asr.mean()
+        mid = [T for T, v in m.items() if 0.15 <= v <= 0.85]
+        if not mid:
+            print("   UNINFORMATIVE: no length has mean ASR in [0.15, 0.85] (floor or ceiling)"); continue
+        peak = max(m.get(2000, np.nan), m.get(8000, np.nan))
+        late = m.get(32000, np.nan)
+        if np.isfinite(peak) and peak > 0 and np.isfinite(late):
+            D = 1 - late / peak
+            a_ = g[g.n_clean == 32000].asr
+            b_ = g[g.n_clean == (2000 if m.get(2000, 0) >= m.get(8000, 0) else 8000)].asr
+            p_ = mw(b_, a_)
+            print(f"   mid-range lengths: {mid}; peak(2000/8000)={peak:.3f}, T=32000={late:.3f}, "
+                  f"decline D={D:.2f}, drop MW p={p_:.3g}, abs drop={peak - late:.3f}")
+    print("Compare: SGD files test Proposition 1 under the optimizer it assumes; compare D(wd0) with D(ctrl) "
+          "per the rule in preregistered_predictions.md.")
 
 
 def h_embdisp(df):

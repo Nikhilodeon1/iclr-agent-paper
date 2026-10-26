@@ -1,0 +1,25 @@
+
+######## C:/Users/nikhi/Codes/RES/src/iclr-agent-paper/results_wave3/results_events_matched.csv  (84 rows, 6 seeds) ########
+== EVENTS: AdamW vs SGD, success counts with Wilson intervals ==
+  opt  n_poison  E  n  succ   lo   hi  mean_asr
+adamw        64  1  6     6 0.61 1.00     0.997
+adamw        64  2  6     6 0.61 1.00     0.994
+adamw        64  4  6     6 0.61 1.00     1.000
+adamw        64 16  6     6 0.61 1.00     1.000
+adamw       128  2  6     6 0.61 1.00     0.997
+adamw       128  4  6     6 0.61 1.00     1.000
+adamw       128 16  6     6 0.61 1.00     1.000
+  sgd        64  1  6     1 0.03 0.56     0.254
+  sgd        64  2  6     2 0.10 0.70     0.304
+  sgd        64  4  6     2 0.10 0.70     0.317
+  sgd        64 16  6     2 0.10 0.70     0.325
+  sgd       128  2  6     5 0.44 0.97     0.829
+  sgd       128  4  6     5 0.44 0.97     0.829
+  sgd       128 16  6     5 0.44 0.97     0.832
+
+Contrast E=min vs E=max within optimizer and N:
+  adamw  N= 64: E=1 6/6 -> E=16 6/6 Fisher p=1
+  adamw  N=128: E=2 6/6 -> E=16 6/6 Fisher p=1
+  sgd    N= 64: E=1 1/6 -> E=16 2/6 Fisher p=1
+  sgd    N=128: E=2 5/6 -> E=16 5/6 Fisher p=1
+Contrasts examined: 4 (uncorrected).
