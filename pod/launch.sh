@@ -24,11 +24,13 @@ start() {
 expand() {
   case "$1" in
     wave[0-9]*) local v="WAVE${1#wave}"; local jl="${!v:-}"
-                [ -n "$jl" ] || { echo "unknown wave $1 (no $v in pod/jobs.sh)"; return 1; }
+                [ -n "$jl" ] || { echo "unknown wave $1: no $v in pod/jobs.sh (is the pod's copy up to date? run git pull)" >&2; return 1; }
                 echo "$jl" ;;
     *) echo "$1" ;;
   esac
 }
 for a in "$@"; do
-  for j in $(expand "$a"); do start "$j" || true; done
+  # the error text goes to stderr, so it can never be word-split into fake job names
+  jl="$(expand "$a")" || continue
+  for j in $jl; do start "$j" || true; done
 done
