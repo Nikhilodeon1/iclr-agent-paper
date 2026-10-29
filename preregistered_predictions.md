@@ -250,3 +250,89 @@ Proposition 2 predicts N* equal to the expected number of clean uses of the trig
   paper keeps the ordering claim only and reports the sublinearity as unexplained.
 - A cell where N50 is censored (never crosses 0.5 within the grid, max 1,024) is reported as censored, not interpolated.
 - Frequency is still measured on WikiText-2, not on the Pile Pythia was pretrained on (G2 would address this; not run).
+
+
+---
+# Wave 4 outcomes, part 1 (appended 2026-10-28 08:43 UTC: Jobs F1-F4; Job G not yet analysed)
+Files results_ds_sgd_n64.csv, results_ds_sgd_n128.csv, results_ds_wd0.csv, results_ds_ctrl.csv: 32 rows each, no duplicates, no NaN ASR, 8 seeds per cell, seeded initialisation. They had been run on an earlier pod and were recovered from persistent storage. The G file was 0 bytes when packed.
+
+| Test | Prediction (fixed in advance) | Outcome | Verdict |
+|---|---|---|---|
+| F4 control (AdamW wd 0.01, N=16) | decline reproduces, D>0.25 | mean ASR 0.342/0.456/0.543/0.082 at T=500/2000/8000/32000; D=0.85 [0.69,0.94]; T8000 vs T32000 one-sided MW p=0.018 | control valid |
+| F3 vs F4 (weight decay) | D(F3) < D(F4); wd main driver if D(F3)<=0.5 D(F4); wrong as main explanation if within 0.25 | F3 means 0.361/0.430/0.499/0.071; D=0.86 [0.81,0.94]; D(F3)-D(F4)=+0.009 [-0.12,0.20]; ASR at T32000 wd0 minus ctrl = -0.011 (p=0.74) | **weight-decay account wrong as main explanation; claim withdrawn** |
+| F1, F2 (SGD, N=64/128) | ASR at T32000 within 0.15 of ASR at T8000 | N=64: 0.571/0.452/0.262/0.203; N=128: 0.98/0.87/0.669/0.536. |T32000-T8000| = 0.06 and 0.13, so the literal rule is met. But T500 to T32000 falls 0.37 and 0.44 (paired Wilcoxon p=0.016, 0.031; 6/8 and 5/8 seeds down, none up); T8000 to T32000 p=0.062 both | literal criterion met, but **invariance not observed under SGD**; the criterion was a weak anchor chosen after SGD's decline had started |
+
+## Flaws in our own predictions and setup
+- The SGD criterion anchored at T=8000, after SGD had already declined from T=500. A rule anchored at the start of the range would have failed.
+- The weight-decay prediction rested on a scalar simulation; the real network does not follow it. The rank correlation over 11 conditions (Spearman 0.67) includes training-length rows that agree with the simulation for a reason now shown to be absent in the network.
+- SGD N=128 is near ceiling at T=500 and T=2000, so only two lengths are mid-range there.
+- 8 seeds; per-seed outcomes are strongly seed-determined (SGD N=64: seed 5 succeeds at every length, seed 0 at none). Tests are one-sided and uncorrected. The bootstrap intervals for D drop draws with a zero peak.
+- ctrl reaches 0.08 at T=32000 here, below the earlier unseeded sweeps (0.14-0.25): the earlier unseeded runs are not the control.
+
+
+---
+# Wave 4 outcomes, part 2 (appended 2026-10-28 09:33 UTC: Job G, Pythia-70M on WikiText-2)
+results_realtext_5seed.csv: 100 rows, no duplicates, no NaN, 5 seeds per cell, baseline ASR 0 for every trigger, clean_loss 4.363-4.665. (Packed folder: results_wave XX.) Thresholds with bootstrap intervals over seeds: realtext_5seed_thresholds.csv.
+
+| Test | Prediction (fixed in advance) | Outcome | Verdict |
+|---|---|---|---|
+| Ordering | N50 strictly increasing over the four frequency levels | N50 = 9.1 [8.7,9.6], 33.4 [33.1,33.8], 35.7 [33.4,39.5], 80.0 [62.3,107.7] at 0 / 0.05 / 0.2 / 0.5 uses per step; strictly increasing; holds in 98% of seed bootstrap resamples | **Supported** (middle pair close: 7% apart; N=64 seed-level MW p=0.22) |
+| Proportionality | slope over the three nonzero levels in 0.7-1.3 (I expected failure) | slope 0.35 [0.25,0.47]; ratios to predicted clean uses 1.11, 0.30, 0.27 | **Fails, as expected**; ordering claim only |
+| Censoring | report as censored if N50 not reached | none censored | n/a |
+
+## Flaws and caveats
+- Interpolation across fourfold grid brackets (N=16 to 64, or 64 to 256); the bootstrap intervals are conditional on that fixed grid and are artificially narrow at f=0.05 (nearly all seeds ~0.93 at N=64).
+- The ordering of f=0.05 vs f=0.2 is weak at the seed level (two-sided MW p=0.22 at N=64); the extremes carry the ordering.
+- Frequency measured on WikiText-2, not the Pile; the mismatch confound is untested (G2 not run).
+- No unpoisoned continuation baseline for clean loss; no trend test with poison count.
+- 2-seed earlier values (8.8, 30.7, 43.9) are replaced; the 5-seed f=0.2 threshold is lower (35.7), so the 0.37x ratio becomes 0.30x.
+
+
+---
+# Wave 5 predictions (fixed 2026-10-28 10:13 UTC, BEFORE any Wave 5 job ran)
+
+Three job groups: DC1-DC9 (where does the training-length decline come from), SU (SGD N=64 top-up), PS/PL (Pythia-160M scale test).
+STATUS: the `decomp` mode was smoke-tested on CPU (tiny model: rows, resume, no duplicates) before the spacing axis was added. The final DC1-DC9 and SU commands were then dry-run through the real script with training stubbed: all ten give exactly the expected rows (24, 24, 12, 12, 6, 6, 6, 6, 16, 56), 0 errors, the intended tags, seeds and total step counts. Not verified: the stubbed run does not exercise real training, the PS/PL Pythia-160M commands (not runnable locally), and the shell edits to jobs.sh (structure-checked only). PL must print trigger ids 741, 2159 and 1142 (the 70M run's zero, 0.2 and 0.5 triggers); if it prints others, the 70M comparison is not like-for-like and the ratio rule below does not apply.
+
+## DC1-DC9: decline decomposition (AdamW, N=16 = 4 poisoned batches x 4 examples, 8 seeded runs per cell)
+Design: B = clean steps before the poison block, A = clean steps after the last poisoned batch, S = spacing between poisoned batches.
+Grid: B in {0, 2000, 8000, 32000} x A in {0, 8000, 32000} at S=700; plus S in {2800, 10000} at B=A=0.
+**Design flaw caught before running:** my first design held S fixed, so it could not test erosion BETWEEN doses. In the old sweeps the same
+poison was spread over the whole run, so spacing grew to ~T/3 while the last dose sat ~5 steps from the end and B was ~5. S was added as a third axis.
+
+Validity: a contrast is informative only if some cell involved has mean ASR in [0.15, 0.85]. I expect the base cell (B=0, A=0, S=700) to sit
+around 0.3-0.6, because it is close to the old T~2,000 spread run (mean ASR 0.46). Floor or ceiling there is reported as uninformative.
+
+"Effect present" means mean paired drop >= 0.25 AND one-sided paired Wilcoxon p < 0.05 (seeds paired across cells; uncorrected; three families of contrasts).
+- **A effect** (post-dose training): ASR(A=0) vs ASR(A=32000) at each B, S=700.
+- **B effect** (pre-dose training): ASR(B=0) vs ASR(B=32000) at each A, S=700.
+- **S effect** (spacing): ASR(S=700) vs ASR(S=10000) at B=A=0.
+
+My probabilities before seeing data (judgments): S effect only 35%; B effect only 20%; A effect only 10%; more than one 20%; none 15%.
+Reason for putting S first: the old sweeps declined with A and B near zero, so the decline was not produced by post-dose or pre-dose time alone as I had assumed; the remaining candidates are spacing or an interaction.
+Interpretation rules:
+- S only: the decline is erosion of the trigger between doses (forgetting at the scale of thousands of steps).
+- B only: a more-trained network is harder to backdoor (plasticity or entrenchment), not forgetting.
+- A only: erosion after the dose; the paper's earlier statement that the decline is not forgetting after the final dose applies to the old sweep's schedule and must be qualified.
+- More than one: report each contrast and do not attribute the decline to a single cause.
+- None, with the base cell informative: the old decline is not reproduced by these manipulations, so it depends on something the design did not vary (e.g. the dose block spanning the whole run). State it as unexplained and say the explanation search came up empty.
+Trigger-row displacement: disp_end / disp_dose < 0.7 means the trigger's OWN embedding row moves back after the last dose; about 1 or above means the row holds and any erosion is downstream.
+I expect about 1 or above (no weight-decay-driven shrinkage, since F3 showed weight decay is not the cause), but have no strong prior.
+
+## SU: SGD N=64 top-up (seeds 6-19; pooled with Job D seeds 0-5 gives 20)
+Same protocol as Job D (n_clean 3000, sgd_lr 0.1, events at segment centres). Job E (AdamW, N=16, 20 seeds) went 5/20 -> 11/20 -> 13/20 successes at E = 1, 4, 16.
+- SGD arm is informative only if ASR at E=1 is off the floor (mean >= 0.10).
+- **Flat (supports the optimizer claim at matched difficulty):** successes at E=16 minus successes at E=1 <= 3/20 and Fisher p > 0.10.
+- **Not flat (weakens Proposition 3's optimizer claim):** E=16 minus E=1 >= 6/20, or paired Wilcoxon p < 0.05 with mean rise >= 0.20.
+- Between: inconclusive.
+My expectation: flat, based on Job D's six seeds (identical per-seed outcomes across E at N=128, mean 0.25-0.33 across E at N=64).
+
+## PS/PL: Pythia-160M vs the 70M run (same corpus and tokenizer, so the same trigger tokens)
+PL: 3 triggers (0, ~0.2, ~0.5 clean uses per step) x 5 poison counts x 5 seeds, 600 steps, lr 5e-5 as for 70M. 70M thresholds (5 seeds): 9.1, 35.7, 80.0.
+- **Primary:** thresholds strictly increasing across the three levels (ordering preserved at the larger size).
+- **Size invariance (Souly et al.'s claim, and the theory has no size term):** ratio N50(160M)/N50(70M) in [0.67, 1.5] at all three triggers means consistent;
+  a ratio below 0.67 at any trigger means the threshold FALLS with scale in this range (report it as such); above 1.5 means it rises.
+- I expect the thresholds to fall somewhat (larger models implant faster), so I put about 40% on invariance across all three, 45% on lower, 15% on other.
+- Any trigger whose N50 is not reached within the grid (max 1,024) is reported as censored.
+- The smoke test PS must show 2 rows with finite clean_loss and higher ASR at N=256 than at N=16. Its "done in X s" time covers 400 steps plus model loads, so PL's step count (45,000) can be extrapolated; it is an upper bound on time.
+- Frequency is still measured on WikiText-2 not the Pile, as for 70M. 410M is not run until PS gives the step speed.

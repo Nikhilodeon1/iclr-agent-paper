@@ -1,0 +1,15 @@
+import sys, torch
+sys.path.insert(0,'.'); sys.argv=SARGV
+import validate_transformer as vt
+class P:
+    def __init__(s,n): s.n=n
+    def numel(s): return s.n
+class M:
+    def __init__(s,T,probe):
+        s.final_loss=3.2; s._p=[P(10)]
+        s.probe_log={x: torch.zeros(3) for x in (probe or []) if x<T}
+        s.probe_log[T]=torch.ones(3)*0.05
+    def parameters(s): return s._p
+def fake_train(n, sched, bigram, r, **k): return M(n,k.get("probe_steps"))
+vt.train_model=fake_train; vt.attack_success_rate=lambda *a,**k:0.5
+vt.main()

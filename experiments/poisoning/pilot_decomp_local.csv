@@ -1,0 +1,5 @@
+experiment,density,n_poison,n_clean,seed,asr,beta2,spacing,span_over_memory,rest_opt,trigger_opt,lr,disp_step,disp_window,pred_disp,dim,layers,n_params,batch,trig_lr,trig_beta2,clean_loss
+decomp_adamw_B0_A0,4,16,2106,0,0.0,,700,,adamw,,0.001,0.5268582701683044,0.5268582701683044,,128,4,813889,64,,,3.7189
+decomp_adamw_B0_A0,4,16,2106,1,0.88,,700,,adamw,,0.001,0.5353356003761292,0.5353356003761292,,128,4,813889,64,,,3.7173
+decomp_adamw_B0_A0,4,16,2106,2,0.05,,700,,adamw,,0.001,0.5339249968528748,0.5339249968528748,,128,4,813889,64,,,3.7191
+decomp_adamw_B0_A2000,4,16,4106,0,0.0,,700,,adamw,,0.001,0.5268582701683044,0.7807604670524597,,128,4,813889,64,,,3.7157

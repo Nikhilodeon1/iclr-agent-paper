@@ -37,10 +37,9 @@ interfere. This zero-parameter prediction correlates with attack success
 across the 11 schedule, length and placement conditions we ran (Spearman $0.67$,
 $p=0.02$), though pooled over heterogeneous groups and so weak on its own, and direct measurements bear on it. One poisoned batch moves the trigger's embedding row by the same amount, to within 3\% of the closed form, whether it holds 1 or 64 poison examples under AdamW, and in proportion to the number of examples under SGD. At 20 seeds and a fixed $N=16$, splitting the poison over 16 batches rather than 1 takes AdamW from $5/20$ to $13/20$ runs succeeding (paired exact $p=0.008$) while SGD stays at floor ($1/20$). With 20 seeds, moving only the trigger's embedding row from AdamW to SGD removes most of the batch-count effect at $N=16$ ($15/20$ against $7/20$ successes at 16 batches, Fisher $p=0.025$). Two tests fixed in advance of the predicted interference between nearby poisoned batches, varying $\beta_2$, were not supported, the second with step size matched by construction and measurement, so we withdraw that prediction; and a learning-rate sweep did not follow the $1/\eta$ budget of Equation~\ref{eq:budget} as a global slope. Continuing pretraining of a pretrained model on natural
 text, with trigger frequencies measured from the corpus rather than imposed, reproduces
-the predicted ordering: the poison needed rises monotonically with corpus frequency and
-a never-occurring trigger is cheapest to implant by $3.5$--$5\times$. Two sweeps specified in advance bear on scale and density: the poison threshold is flat from $0.8$M to $25$M parameters (log-log slope $-0.02$, interval $[-0.15,0.08]$) but more than five times higher at $0.11$M, and it grows with per-batch density as $k^{0.42}$ (interval $[0.23,0.55]$), between the batch-only prediction of $1$ and the example-only prediction of $0$. We state two limits plainly. The range is far below the $600$M--$13$B parameters of \citet{souly2025poisoning}; and count invariance holds only within a window
-of training lengths, beyond which attack success decays in a way our account predicts in
-direction but underestimates in size. The SGD arm of the optimizer comparison sits at
+the predicted ordering at four measured frequencies and 5 seeds: the poison needed rises with corpus frequency, though sublinearly, and
+a never-occurring trigger is cheapest to implant, by $3.7$--$8.8\times$. Two sweeps specified in advance bear on scale and density: the poison threshold is flat from $0.8$M to $25$M parameters (log-log slope $-0.02$, interval $[-0.15,0.08]$) but more than five times higher at $0.11$M, and it grows with per-batch density as $k^{0.42}$ (interval $[0.23,0.55]$), between the batch-only prediction of $1$ and the example-only prediction of $0$. We state two limits plainly. The range is far below the $600$M--$13$B parameters of \citet{souly2025poisoning}; and count invariance holds only within a window
+of training lengths, beyond which attack success decays under AdamW, under SGD and with weight decay removed, which our account does not explain. The SGD arm of the optimizer comparison sits at
 floor, so it bounds rather than establishes the contrast.
 \end{abstract}
 
@@ -94,8 +93,7 @@ discounted when they fall within the second-moment memory of one another.
     poisoning less sample-efficient.
     \item Validation on a transformer trained from scratch, including a fixed before running
     test of the $q$ transition, and an account of where the theory's reach
-    ends: count invariance holds only within a window of training lengths, and the
-    decay beyond it is predicted in direction but not in magnitude.
+    ends: count invariance holds only within a window of training lengths, and the decay beyond it, which occurs under both optimizers and without weight decay, is not explained by the theory.
     \item A controlled optimizer intervention (Section~\ref{sec:events}): on the same
     transformer, holding the total poison count fixed and varying how many batches it
     is split into raises attack success under AdamW but not under SGD. At 20 seeds AdamW goes from $5/20$ to $13/20$ successes at $N=16$ (paired exact $p=0.008$; the Wilson intervals just touch) against an SGD arm at floor ($1/20$), which bounds rather than establishes the contrast.
@@ -463,20 +461,9 @@ at density 4, ASR is not constant in training length. Pooling two independent sw
 $T=500$, $0.52$ at $2{,}000$, $0.49$ at $8{,}000$, $0.18$ at $32{,}000$ and $0.13$ at
 $64{,}000$. Comparing $T=500$ with the pooled $T\in\{2{,}000,8{,}000\}$ runs, and those with the pooled $T\in\{32{,}000,64{,}000\}$ runs (windows chosen after seeing the means), one-sided Mann--Whitney gives $p=7\times10^{-5}$ and $p=6\times10^{-4}$; single-length contrasts are weaker ($T=8{,}000$ versus $32{,}000$: $p=0.012$; versus $64{,}000$: $p=0.059$, 6 runs); the two sweeps agree on this shape but not
 on whether the peak lies at 2{,}000 or 8{,}000. Proposition~\ref{thm:count-regime}'s
-invariance therefore holds only approximately, within a window of training lengths. A
-caveat on this comparison: Proposition~\ref{thm:count-regime} is an SGD result, whereas
-every run in this sweep uses AdamW, so the mismatch may reflect the optimizer rather
-than a failure of the proposition. The corresponding SGD sweep over $T$ is not reported
-here and is needed to separate the two. The decline is not forgetting after the final
-dose, because the last poisoned batch is always 5 steps before the end of training.
-Instead, the spacing between the four poisoned batches grows as $T/3$, consistent
-with each dose partially decaying before the next arrives. The Adam account of Section~\ref{sec:prop3} reproduces this shape once decoupled
-weight decay is included: simulating the trigger coordinate under each experiment's
-own schedule gives a displacement whose maximum falls at $T=8{,}000$, inside the observed peak
-region, while setting the weight decay to zero makes it rise and then plateau ($0.082$ at both $T=32{,}000$ and $64{,}000$) with no peak (Appendix~\ref{app:adam}). The predicted decline is far smaller than the
-observed one ($17\%$ against $75\%$ from $T=8{,}000$ to $64{,}000$), so decoupled
-weight decay accounts for the turning point and the direction but not the magnitude.
-A rise-times-decay consistency check is reported in Appendix~\ref{app:fit}.
+invariance therefore holds only approximately, within a window of training lengths. The decline is not forgetting after the final dose, because the last poisoned batch is always 5 steps before the end of training.
+Two follow-up sweeps, specified before running (8 seeded runs per cell, Table~\ref{tab:ds4}),
+ask whether the optimizer or weight decay is responsible. \emph{Optimizer.} Proposition~\ref{thm:count-regime} is an SGD result. Under SGD at $N=64$ and $N=128$, where SGD is off the floor, mean ASR falls with training length at every step: $0.57, 0.45, 0.26, 0.20$ and $0.98, 0.87, 0.67, 0.54$ at $T=500, 2{,}000, 8{,}000, 32{,}000$. From $T=500$ to $32{,}000$ the paired one-sided Wilcoxon $p$ is $0.016$ and $0.031$, with $6$ and $5$ of $8$ seeds lower and none higher. The criterion fixed in advance, that ASR at $T=32{,}000$ lie within $0.15$ of its value at $T=8{,}000$, was met ($0.06$ and $0.13$), but we do not read this as support: the criterion was anchored after SGD's decline had begun, and the decline under SGD starts at the shortest length, whereas under AdamW attack success first rises (the poison budgets differ, so the magnitudes are not comparable). Proposition~\ref{thm:count-regime}'s invariance is therefore not observed in the transformer under its own optimizer over $T\in[500,32{,}000]$. \emph{Weight decay.} With AdamW at $N=16$, removing weight decay leaves the decline unchanged: mean ASR is $0.34, 0.46, 0.54, 0.08$ with the default decay and $0.36, 0.43, 0.50, 0.07$ with none, so the fall from the $T=2{,}000$--$8{,}000$ peak is $85\%$ (bootstrap interval $[69,94]$) and $86\%$ ($[81,94]$), a difference of $0.009$ (interval $[-0.12,0.20]$). Our rule counted the weight-decay account as wrong as the main explanation if the two differed by less than $0.25$. We therefore withdraw the claim that decoupled weight decay accounts for the turning point. It does so in our scalar Adam simulation (Appendix~\ref{app:adam}), but the decline in the transformer does not depend on it. The decline is present under AdamW with and without weight decay and under SGD, and it remains unexplained; drift of parameters shared with the clean task is a hypothesis we have not tested. A rise-times-decay consistency check is reported in Appendix~\ref{app:fit}.
 
 \textbf{Scheduling (Figure~\ref{fig:realmodel}b), and why this sweep does not support a
 batch-count claim.} This sweep varies batch count by varying per-batch density at fixed
@@ -739,21 +726,20 @@ invariance that holds at every horizon.
 
 \textbf{What it explains only partly.} Attack success on the transformer declines for
 training runs much longer than the poison schedule (Figure~\ref{fig:realmodel}a). This
-is not forgetting after the final poisoned batch, and in a dedicated placement experiment (5 runs per condition) no pairwise difference between early, even and late placement of the poison was significant (two-sided Mann--Whitney $p\geq0.22$), so an erosion-after-dosing account is neither supported nor excluded. Two mechanisms in
-our model point the right way without the right magnitude: with decoupled weight decay
-the Adam model's maximum falls at $T=8{,}000$, within the observed peak region of
-$2{,}000$--$8{,}000$ (whose two means, $0.52$ and $0.49$, we cannot separate), and
-declines thereafter, while removing the weight decay removes the decline entirely;. Neither
-reproduces the size of the decline, $17\%$ predicted against $75\%$ observed.
+is not forgetting after the final poisoned batch, and in a dedicated placement experiment (5 runs per condition) no pairwise difference between early, even and late placement of the poison was significant (two-sided Mann--Whitney $p\geq0.22$), so an erosion-after-dosing account is neither supported nor excluded. The decline is also not specific to
+AdamW or to weight decay: it persists under SGD and with the weight decay set to zero
+(Section~\ref{sec:validation}), so the weight-decay mechanism in our scalar Adam simulation,
+which produced a peak and a small decline, does not explain it. Our account therefore
+does not explain the training-length dependence of the threshold.
 \citet{souly2025poisoning} likewise report gradual decay under continued clean training.
-Closing the gap plausibly requires modelling the drift of parameters shared with the
-clean task, which the scalar reduction does not track.
+A natural hypothesis is drift of parameters shared with the clean task, which the scalar
+reduction does not track; we have not tested it.
 
 \textbf{Scope.} The from-scratch experiments use a synthetic bigram task and a 0.81M-parameter transformer (Section~\ref{sec:threshold} varies this from 0.11M to 25M parameters), following prior solvable-model poisoning
 theory~\citep{linearpoisoning2025,glmbackdoor2026}; Section~\ref{sec:realtext} adds a pretrained
-model on natural text at two seeds per cell. The theory is a scalar reduction. A $p=200$ simulation
+model on natural text at 5 seeds per cell. The theory is a scalar reduction. A $p=200$ simulation
 (Appendix~\ref{app:highdim}) finds that its orderings in $N$ and $\rho$ hold in every cell and in $T$ in 15 of 18, but also that Proposition~\ref{prop:fraction-regime} overestimates attack success at $\rho>0$ there (sign agreement 16 of 24), so we read it as consistent with the mechanism and the direction of the dependence rather than a quantitatively accurate threshold. Individual runs end close to 0 or 1, so we report success counts with Wilson intervals
-where it matters. The optimizer and parameter-group comparisons rest on 20 seeds, the $\beta_2$ tests on 10 and 8, the learning-rate sweep on 5 and the SGD sweep on 6. The experiment that would most change what can be concluded is an SGD sweep over training length, to test Proposition~\ref{thm:count-regime} under the optimizer it assumes rather than under AdamW; a same-budget AdamW-versus-SGD comparison also remains undone, since our attempt put AdamW at ceiling.
+where it matters. The optimizer and parameter-group comparisons rest on 20 seeds, the $\beta_2$ tests on 10 and 8, the learning-rate sweep on 5 and the SGD sweep on 6. The training-length sweeps use 8 seeds per cell, and their rank and paired tests are one-sided and uncorrected. A same-budget AdamW-versus-SGD comparison remains undone, since our attempt put AdamW at ceiling, and the cause of the training-length decline is open.
 
 \section{Conclusion}
 
@@ -765,8 +751,7 @@ never produces is learned from poison alone while its margin is small, so additi
 clean data does not raise the threshold; a trigger clean text also uses must outcompete
 those uses, and its price grows with the corpus. Applied to Adam, the same model accounts for
 why packing poison densely into batches wastes it. For defenders this reframes what to
-measure: corpus frequency of a candidate trigger, not poison fraction, orders how expensive the attack is in our experiments. The clearest open problem is quantitative -- both of our decay
-mechanisms underpredict how fast an implanted backdoor erodes under long clean training.
+measure: corpus frequency of a candidate trigger, not poison fraction, orders how expensive the attack is in our experiments. The clearest open problem is the training-length dependence: attack success falls over long clean training under AdamW, under SGD and with weight decay removed, and neither of the mechanisms we model explains it.
 
 \subsection*{AI use statement}
 We used generative AI tools for tasks with required disclosure under ICLR's AI Policy
@@ -839,8 +824,8 @@ and bias correction), next to the observed mean attack success rate. No paramete
 fitted; the Spearman rank correlation over the 11 conditions is $0.67$ ($p=0.023$).
 Table~\ref{tab:adam-wd} repeats the training-length rows with the weight decay set to
 zero, giving displacements
-of $0.030$, $0.052$, $0.078$, $0.082$ and $0.082$ at $T=500$ to $64{,}000$: non-decreasing, rising and then plateauing, with no peak. The non-monotonicity in Table~\ref{tab:adam-mech} is therefore
-produced by decoupled weight decay acting over the poison-free remainder of training.
+of $0.030$, $0.052$, $0.078$, $0.082$ and $0.082$ at $T=500$ to $64{,}000$: non-decreasing, rising and then plateauing, with no peak. In this simulation the non-monotonicity in Table~\ref{tab:adam-mech} is therefore
+produced by decoupled weight decay acting over the poison-free remainder of training. The transformer does not behave this way: with weight decay set to zero its attack success still falls by the same amount (Table~\ref{tab:ds4}). The training-length rows of Table~\ref{tab:adam-mech} therefore agree with the simulation for a reason that is absent in the network, which weakens the rank correlation reported above.
 
 \begin{table}[ht]
 \caption{Predicted trigger displacement at each training length, with and without decoupled weight decay}
@@ -874,9 +859,7 @@ recorded for every run.
 
 \textbf{Scope and confounds.} The model is pretrained rather than trained from scratch,
 the corpus is natural text, and trigger frequencies are measured rather than imposed, so
-the $q$ transition is tested outside the setting that produced it. It remains a small
-model on a small corpus at two seeds per cell, with the highest-frequency condition
-incomplete at submission; we do not reproduce the pretraining-scale behaviour of
+the $q$ transition is tested outside the setting that produced it. It remains a small model on a small corpus at 5 seeds per cell; we do not reproduce the pretraining-scale behaviour of
 \citet{souly2025poisoning} and do not claim to. A specific confound deserves naming: we
 measure $q$ in WikiText-2, not in the Pile that Pythia was pretrained on, so a token
 absent from WikiText may still have been seen in pretraining, and conversely a token
@@ -1277,6 +1260,26 @@ $N$ & $\eta=3\times10^{-4}$ & $10^{-3}$ & $3\times10^{-3}$ \\
 64 & 0.61 & 1.00 & 0.74 \\
 128 & 0.99 & 1.00 & 0.73 \\
 256 & 1.00 & 1.00 & 1.00 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Training-Length Sweeps}
+\label{app:ds}
+
+\begin{table}[ht]
+\caption{Training-length sweeps (8 seeded runs per cell): runs with ASR above $0.5$ and, in parentheses, mean ASR. Specified before running.}
+\label{tab:ds4}
+\centering
+\small
+\begin{tabular}{lrrrrr}
+\toprule
+Optimizer & $N$ & $T=500$ & $2{,}000$ & $8{,}000$ & $32{,}000$ \\
+\midrule
+AdamW, weight decay $0.01$ (control) & 16 & 3/8 (0.34) & 3/8 (0.46) & 5/8 (0.54) & 0/8 (0.08) \\
+AdamW, weight decay $0$ & 16 & 4/8 (0.36) & 3/8 (0.43) & 4/8 (0.50) & 0/8 (0.07) \\
+SGD & 64 & 5/8 (0.57) & 3/8 (0.45) & 2/8 (0.26) & 2/8 (0.20) \\
+SGD & 128 & 8/8 (0.98) & 7/8 (0.87) & 5/8 (0.67) & 4/8 (0.54) \\
 \bottomrule
 \end{tabular}
 \end{table}

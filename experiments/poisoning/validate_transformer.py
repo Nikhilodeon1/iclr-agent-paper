@@ -878,6 +878,78 @@ def run_interference2_experiment(args, writer, f):
                   f"trig_lr={trig_lr:.2e} disp_window={dw:.6f}", flush=True)
 
 
+def run_decomp_experiment(args, writer, f):
+    """Where does the training-length decline come from? Separate three things that our
+    earlier training-length sweeps changed together when they lengthened T:
+      B = clean steps BEFORE the poison block,
+      A = clean steps AFTER the last poisoned batch,
+      S = spacing between poisoned batches (erosion BETWEEN doses).
+    The block is E poisoned batches of k examples each, exactly S steps apart, the first
+    at step B+5. In the old sweeps the same poison was spread over the whole run, so S grew
+    to about T/3 and the last dose sat 5 steps from the end (A about 5), while B was about 5.
+      - ASR falls with A at fixed B,S  -> erosion after the dose (forgetting).
+      - ASR falls with B at fixed A,S  -> a more-trained network is harder to backdoor
+                                          (plasticity / entrenchment), not forgetting.
+      - ASR falls with S at B=A=0      -> erosion between doses.
+    Each run also records the trigger embedding row's displacement from just before the
+    first dose to (a) just after the last dose and (b) the end of training, so erosion
+    inside the trigger's own parameters can be told apart from erosion downstream.
+    Columns reused (no header change): disp_step = displacement after the last dose,
+    disp_window = displacement at the end; n_clean = total steps; spacing = S.
+    Row tag: decomp_<opt>_B<B>_A<A>_S<S>.
+    """
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    E, k, opt_name = args.decomp_events, args.decomp_per_event, args.decomp_opt
+    sp_grid = args.decomp_spacing_grid or [args.decomp_spacing]
+    cells = [(B, A, sp) for B in args.pre_grid for A in args.post_grid for sp in sp_grid]
+    plans = {}
+    for B, A, sp in cells:
+        first = B + 5
+        sched = [(first + i * sp, k) for i in range(E)]
+        last = sched[-1][0]
+        n_total = last + 1 + A
+        steps = [s for s, _ in sched]
+        assert len(set(steps)) == E and k <= args.batch and max(steps) < n_total, (B, A, sp)
+        assert sum(x for _, x in sched) == E * k
+        plans[(B, A, sp)] = (sched, first, last, n_total)
+    total = sum(plans[c][3] for c in cells) * args.seeds
+    print(f"[decomp] preflight OK; {len(cells)} cells x {args.seeds} seeds, block {E}x{k}; "
+          f"{total:,} total training steps (~{total/37/3600:.1f} h at ~37 steps/s on one process)",
+          flush=True)
+    for B, A, sp in cells:
+        sched, first, last, n_total = plans[(B, A, sp)]
+        tag = f"decomp_{opt_name}_B{B}_A{A}_S{sp}"
+        for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+            if (tag, E * k, seed) in args.done_keys:
+                continue
+            r = np.random.default_rng(1100 + seed)
+            try:
+                model = train_model(n_total, sched, bigram, r, d=args.dim, n_layer=args.layers,
+                                    batch=args.batch, lr=args.lr, optimizer=opt_name,
+                                    sgd_lr=args.sgd_lr, weight_decay=args.weight_decay,
+                                    torch_seed=seed, probe_steps=[first, last + 1])
+                asr = attack_success_rate(model, trigger_id=TRIGGER_RARE)
+                pl = model.probe_log
+                row0, row_end = pl[first], pl[n_total]
+                row_dose = pl.get(last + 1, row_end)   # A=0: last+1 == n_total
+                d_dose = float((row_dose - row0).norm())
+                d_end = float((row_end - row0).norm())
+                npar = sum(p.numel() for p in model.parameters())
+                cl = model.final_loss
+            except Exception as e:
+                print(f"[{tag}] seed={seed} ERROR: {e}", flush=True)
+                continue
+            writer.writerow(dict(experiment=tag, density=k, n_poison=E * k, n_clean=n_total,
+                                 seed=seed, asr=asr, spacing=sp, rest_opt=opt_name, lr=args.lr,
+                                 disp_step=d_dose, disp_window=d_end, dim=args.dim,
+                                 layers=args.layers, n_params=npar, batch=args.batch,
+                                 clean_loss=round(cl, 4)))
+            f.flush()
+            print(f"[{tag}] seed={seed} asr={asr:.3f} disp_after_dose={d_dose:.4f} "
+                  f"disp_end={d_end:.4f} clean_loss={cl:.3f}", flush=True)
+
+
 def run_embdisp_experiment(args, writer, f):
     """Direct test of Proposition 3 on the real transformer: how far does ONE poisoned
     batch move the trigger's own embedding row, as a function of how many poison examples
@@ -947,7 +1019,7 @@ def main():
     ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho",
                                               "placement", "events", "beta2", "paramgroup",
                                               "lrscaling", "embdisp",
-                                              "threshold", "interference2", "all"], default="schedule")
+                                              "threshold", "interference2", "decomp", "all"], default="schedule")
     ap.add_argument("--events_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--per_event_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--optimizers", nargs="+", choices=["adamw", "sgd"], default=["adamw", "sgd"])
@@ -1016,6 +1088,16 @@ def main():
     ap.add_argument("--resume", action="store_true",
                      help="threshold/interference2 only: continue an existing CSV, skipping "
                           "cells (experiment, n_poison, seed) it already holds")
+    ap.add_argument("--pre_grid", type=int, nargs="+", default=[0, 2000, 8000, 32000],
+                     help="decomp: clean steps BEFORE the poison block")
+    ap.add_argument("--post_grid", type=int, nargs="+", default=[0, 8000, 32000],
+                     help="decomp: clean steps AFTER the last poisoned batch")
+    ap.add_argument("--decomp_events", type=int, default=4, help="decomp: poisoned batches in the block")
+    ap.add_argument("--decomp_per_event", type=int, default=4, help="decomp: poison examples per batch")
+    ap.add_argument("--decomp_spacing", type=int, default=700, help="decomp: steps between poisoned batches")
+    ap.add_argument("--decomp_spacing_grid", type=int, nargs="+", default=None,
+                     help="decomp: spacings to cross with the pre/post grids (default: --decomp_spacing only)")
+    ap.add_argument("--decomp_opt", choices=["adamw", "sgd"], default="adamw")
     ap.add_argument("--append", action="store_true",
                      help="append to --out instead of overwriting (and skip the header) -- "
                           "use when merging a rerun's results into an existing partial CSV")
@@ -1029,8 +1111,8 @@ def main():
     args.done_keys = set()
     resume_header = None
     if args.resume:
-        if args.experiment not in ("threshold", "interference2"):
-            raise SystemExit("--resume is only supported for --experiment threshold/interference2; "
+        if args.experiment not in ("threshold", "interference2", "decomp"):
+            raise SystemExit("--resume is only supported for --experiment threshold/interference2/decomp; "
                              "other modes have no skip logic and would write duplicate rows")
         if os.path.exists(args.out) and os.path.getsize(args.out) > 0:
             resume_header, args.done_keys = load_done_cells(args.out)
@@ -1066,6 +1148,8 @@ def main():
             run_paramgroup_experiment(args, writer, f)
         if args.experiment == "lrscaling":
             run_lrscaling_experiment(args, writer, f)
+        if args.experiment == "decomp":
+            run_decomp_experiment(args, writer, f)
         if args.experiment == "threshold":
             run_threshold_experiment(args, writer, f)
         if args.experiment == "interference2":

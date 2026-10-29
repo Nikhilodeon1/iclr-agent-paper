@@ -39,3 +39,19 @@ JOB_F4="results_ds_ctrl.csv|32|--experiment dataset_size --out results_ds_ctrl.c
 JOB_GS="results_smoke_rt.csv|2|REALTEXT --experiment frequency --out results_smoke_rt.csv --max_tokens 200000 --n_steps 200 --seeds 1 --batch 8 --seq_len 128 --freq_targets 0 --n_poison_grid 16 256"
 JOB_G="results_realtext_5seed.csv|100|REALTEXT --experiment frequency --out results_realtext_5seed.csv --n_steps 600 --seeds 5 --freq_targets 0 0.05 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
 WAVE4="F1 F2 F3 F4"
+
+# ---- Wave 5: where does the training-length decline come from? (decomp = before x after x spacing) ----
+# DC1-DC8: 4 pre-dose lengths x 3 post-dose lengths, spacing fixed at 700, 8 seeds, split into balanced jobs.
+JOB_DC1="results_decomp_B0.csv|24|--experiment decomp --out results_decomp_B0.csv --dim 128 --layers 4 --pre_grid 0 --post_grid 0 8000 32000 --seeds 8 --seed_offset 0"
+JOB_DC2="results_decomp_B2000.csv|24|--experiment decomp --out results_decomp_B2000.csv --dim 128 --layers 4 --pre_grid 2000 --post_grid 0 8000 32000 --seeds 8 --seed_offset 0"
+JOB_DC3="results_decomp_B8000_s0.csv|12|--experiment decomp --out results_decomp_B8000_s0.csv --dim 128 --layers 4 --pre_grid 8000 --post_grid 0 8000 32000 --seeds 4 --seed_offset 0"
+JOB_DC4="results_decomp_B8000_s4.csv|12|--experiment decomp --out results_decomp_B8000_s4.csv --dim 128 --layers 4 --pre_grid 8000 --post_grid 0 8000 32000 --seeds 4 --seed_offset 4"
+JOB_DC5="results_decomp_B32000_s0.csv|6|--experiment decomp --out results_decomp_B32000_s0.csv --dim 128 --layers 4 --pre_grid 32000 --post_grid 0 8000 32000 --seeds 2 --seed_offset 0"
+JOB_DC6="results_decomp_B32000_s2.csv|6|--experiment decomp --out results_decomp_B32000_s2.csv --dim 128 --layers 4 --pre_grid 32000 --post_grid 0 8000 32000 --seeds 2 --seed_offset 2"
+JOB_DC7="results_decomp_B32000_s4.csv|6|--experiment decomp --out results_decomp_B32000_s4.csv --dim 128 --layers 4 --pre_grid 32000 --post_grid 0 8000 32000 --seeds 2 --seed_offset 4"
+JOB_DC8="results_decomp_B32000_s6.csv|6|--experiment decomp --out results_decomp_B32000_s6.csv --dim 128 --layers 4 --pre_grid 32000 --post_grid 0 8000 32000 --seeds 2 --seed_offset 6"
+JOB_DC9="results_decomp_spacing.csv|16|--experiment decomp --out results_decomp_spacing.csv --dim 128 --layers 4 --pre_grid 0 --post_grid 0 --seeds 8 --seed_offset 0 --decomp_spacing_grid 2800 10000"
+JOB_SU="results_events_sgd_n64_topup.csv|56|--experiment events --out results_events_sgd_n64_topup.csv --dim 128 --layers 4 --seeds 14 --seed_offset 6 --n_clean 3000 --sgd_lr 0.1 --optimizers sgd --events_grid 1 2 4 16 --per_event_grid 4 8 16 32 64 --only_N 64"
+JOB_PS="results_smoke_rt160.csv|2|REALTEXT --experiment frequency --model EleutherAI/pythia-160m --out results_smoke_rt160.csv --max_tokens 200000 --n_steps 200 --seeds 1 --batch 8 --seq_len 128 --freq_targets 0 --n_poison_grid 16 256"
+JOB_PL="results_realtext_160m.csv|75|REALTEXT --experiment frequency --model EleutherAI/pythia-160m --out results_realtext_160m.csv --n_steps 600 --seeds 5 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+WAVE5="DC1 DC2 DC3 DC4 DC5 DC6 DC7 DC8 DC9 SU"
