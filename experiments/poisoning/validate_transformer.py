@@ -476,7 +476,8 @@ def events_schedule(n_clean_steps, n_events, per_event):
 
 
 def run_events_experiment(args, writer, f):
-    """Events vs examples: cross the number of poisoned batches (E) with the number
+    """(--lr sets the AdamW learning rate and is recorded with clean_loss; --resume skips finished
+    (tag, N, seed) cells.) Events vs examples: cross the number of poisoned batches (E) with the number
     of poison examples per batch (k), under AdamW and SGD. Adam's per-parameter
     normalisation predicts ASR tracks E and is ~flat in k; SGD predicts it tracks
     the total count E*k. Rows: experiment=events_<opt>_E<E>, density=k."""
@@ -500,18 +501,28 @@ def run_events_experiment(args, writer, f):
                 for seed in seeds:
                     r = np.random.default_rng(700 + seed)
                     sched = events_schedule(args.n_clean, E, k)
+                    # A non-default AdamW learning rate is part of the cell's identity (so a
+                    # low-lr run can never be mixed up with the default-lr runs in a pooled file).
                     tag = f"events_{opt_name}_E{E}"
+                    if opt_name == "adamw" and args.lr != 1e-3:
+                        tag += f"_lr{args.lr:g}"
+                    if (tag, E * k, seed) in args.done_keys:
+                        continue
                     try:
                         model = train_model(args.n_clean, sched, bigram, r, d=args.dim, n_layer=args.layers,
-                                             optimizer=opt_name, sgd_lr=args.sgd_lr, torch_seed=seed)
+                                             lr=args.lr, batch=args.batch, optimizer=opt_name, sgd_lr=args.sgd_lr, torch_seed=seed)
                         asr = attack_success_rate(model)
+                        cl = model.final_loss
                     except Exception as e:
                         print(f"[{tag}] k={k} seed={seed} ERROR: {e}", flush=True)
                         continue
                     writer.writerow(dict(experiment=tag, density=k, n_poison=E * k,
-                                          n_clean=args.n_clean, seed=seed, asr=asr))
+                                          n_clean=args.n_clean, seed=seed, asr=asr,
+                                          rest_opt=opt_name, lr=(args.lr if opt_name == "adamw" else args.sgd_lr),
+                                          dim=args.dim, layers=args.layers, batch=args.batch,
+                                          clean_loss=round(cl, 4)))
                     f.flush()
-                    print(f"[{tag}] k={k:3d} N={E*k:4d} seed={seed} asr={asr:.3f}", flush=True)
+                    print(f"[{tag}] k={k:3d} N={E*k:4d} seed={seed} asr={asr:.3f} clean_loss={cl:.3f}", flush=True)
 
 
 def adam_event_displacement(beta1, beta2):
@@ -1111,8 +1122,8 @@ def main():
     args.done_keys = set()
     resume_header = None
     if args.resume:
-        if args.experiment not in ("threshold", "interference2", "decomp"):
-            raise SystemExit("--resume is only supported for --experiment threshold/interference2/decomp; "
+        if args.experiment not in ("threshold", "interference2", "decomp", "events"):
+            raise SystemExit("--resume is only supported for --experiment threshold/interference2/decomp/events; "
                              "other modes have no skip logic and would write duplicate rows")
         if os.path.exists(args.out) and os.path.getsize(args.out) > 0:
             resume_header, args.done_keys = load_done_cells(args.out)

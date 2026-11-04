@@ -55,3 +55,14 @@ JOB_SU="results_events_sgd_n64_topup.csv|56|--experiment events --out results_ev
 JOB_PS="results_smoke_rt160.csv|2|REALTEXT --experiment frequency --model EleutherAI/pythia-160m --out results_smoke_rt160.csv --max_tokens 200000 --n_steps 200 --seeds 1 --batch 8 --seq_len 128 --freq_targets 0 --n_poison_grid 16 256"
 JOB_PL="results_realtext_160m.csv|75|REALTEXT --experiment frequency --model EleutherAI/pythia-160m --out results_realtext_160m.csv --n_steps 600 --seeds 5 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
 WAVE5="DC1 DC2 DC3 DC4 DC5 DC6 DC7 DC8 DC9 SU"
+
+# ---- Wave 6: (SP) spacing contrast with 20 new seeds; (MA) same-budget AdamW vs SGD at N=64 ----
+# SP1-SP4: decomp mode, B=A=0, 4 poisoned batches of 4, spacings 700/2800/10000, 5 new seeds each (seeds 8-27).
+JOB_SP1="results_spacing_s8.csv|15|--experiment decomp --out results_spacing_s8.csv --dim 128 --layers 4 --pre_grid 0 --post_grid 0 --seeds 5 --seed_offset 8 --decomp_spacing_grid 700 2800 10000"
+JOB_SP2="results_spacing_s13.csv|15|--experiment decomp --out results_spacing_s13.csv --dim 128 --layers 4 --pre_grid 0 --post_grid 0 --seeds 5 --seed_offset 13 --decomp_spacing_grid 700 2800 10000"
+JOB_SP3="results_spacing_s18.csv|15|--experiment decomp --out results_spacing_s18.csv --dim 128 --layers 4 --pre_grid 0 --post_grid 0 --seeds 5 --seed_offset 18 --decomp_spacing_grid 700 2800 10000"
+JOB_SP4="results_spacing_s23.csv|15|--experiment decomp --out results_spacing_s23.csv --dim 128 --layers 4 --pre_grid 0 --post_grid 0 --seeds 5 --seed_offset 23 --decomp_spacing_grid 700 2800 10000"
+# MA1, MA2: AdamW at lr 3e-4, N=64 total, E = 1,2 (MA1) and 4,16 (MA2) poisoned batches, 20 seeds. The SGD arm is not rerun.
+JOB_MA1="results_matched_adamw_a.csv|40|--experiment events --out results_matched_adamw_a.csv --dim 128 --layers 4 --seeds 20 --seed_offset 0 --n_clean 3000 --optimizers adamw --lr 0.0003 --events_grid 1 2 --per_event_grid 32 64 --only_N 64"
+JOB_MA2="results_matched_adamw_b.csv|40|--experiment events --out results_matched_adamw_b.csv --dim 128 --layers 4 --seeds 20 --seed_offset 0 --n_clean 3000 --optimizers adamw --lr 0.0003 --events_grid 4 16 --per_event_grid 4 16 --only_N 64"
+WAVE6="SP1 SP2 SP3 SP4 MA1 MA2"

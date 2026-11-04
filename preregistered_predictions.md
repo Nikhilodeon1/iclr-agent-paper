@@ -336,3 +336,172 @@ PL: 3 triggers (0, ~0.2, ~0.5 clean uses per step) x 5 poison counts x 5 seeds, 
 - Any trigger whose N50 is not reached within the grid (max 1,024) is reported as censored.
 - The smoke test PS must show 2 rows with finite clean_loss and higher ASR at N=256 than at N=16. Its "done in X s" time covers 400 steps plus model loads, so PL's step count (45,000) can be extrapolated; it is an upper bound on time.
 - Frequency is still measured on WikiText-2 not the Pile, as for 70M. 410M is not run until PS gives the step speed.
+
+
+---
+# Local CPU check A: p-dimensional sparse-trigger model (specified 2026-11-04 07:58 UTC, before any run of highdim_sparse.py)
+
+**Purpose.** The scalar reduction drops the contribution u = w_{2:p}.x_{2:p} of the other coordinates on poisoned and
+trigger-bearing examples. The earlier p=200 check used the DENSE trigger model, not the sparse one, so it did not test the
+model the propositions are about. This run simulates the SPARSE model directly in p=200 dimensions.
+
+**Model simulated (fixed now).** p=200. Context x' ~ N(0, I_199) on every example. Trigger coordinate x_1 = c on poisoned
+and trigger-bearing examples, 0 otherwise, with c^2 = 199 so the trigger has the same magnitude as the rest of the input;
+eta = 0.3/199 so that eta*c^2 = 0.3 as in the scalar tables. Clean no-trigger examples: y ~ Bernoulli(sigmoid(beta.x')),
+||beta|| = B, y in {-1,+1}. Trigger-bearing clean examples (probability q among clean steps): y = -1. Poisoned examples: y = +1.
+Online logistic SGD, one example per step, w' warm-started at beta (the clean task is at its optimum when training begins;
+this is an assumption, not a result). z = c*w_1. n_clean clean steps and n_poison poisoned steps, poison spread evenly.
+B in {0.5, 1, 2}, 5 seeds per cell.
+
+**Quantity measured from the clean block, not from z.** s = mean ||w'|| over the run (flat covariance, so u has standard
+deviation ||w'||). Probit approximation: E sigmoid(z+u) ~ sigmoid(z/k), k = sqrt(1 + pi*s^2/8).
+
+**Derived predictions (written before the run).**
+1. q = 0, count invariance: N*(z_req = 2) does not depend on n_clean. Over n_clean in {1000, 4000, 16000} the log-log slope
+   of N* against n_clean lies in [-0.15, 0.15].
+2. q = 0, scalar value: N* from Equation (2) with z_req = 2 is 27.96. Measured N* lies within a factor 2 of it
+   (0.5x to 2x) at every B. This is the quantitative claim of the scalar model.
+3. q = 0, refined value: with u included, z + k(exp(z/k) - 1) = eta*c^2*s, so N*_hd = (z_req + k(exp(z_req/k) - 1))/0.3, using the
+   measured s. Measured N* lies within 0.85x to 1.15x of N*_hd. A miss here means the u-correction is not the whole story.
+4. q > 0, sign: in every cell with |z*| >= 0.3 (z* = ln(N/(q n_clean))), the time-averaged simulated margin over the last
+   quarter of steps has the sign of z*. Cells with |z*| < 0.3 are excluded.
+5. q > 0, magnitude: the simulated margin is larger in magnitude than z* by the factor k, so measured/(k z*) lies in 0.85 to 1.15
+   and measured/z* lies in 0.8 to 1.6 (the scalar model's own acceptance band).
+
+**Rule.** A prediction that misses is reported as not supported with the same prominence as the others. Predictions 2 and 5
+are the ones that decide whether the scalar model is quantitatively adequate; 3 and the k part of 5 test the correction.
+
+
+---
+# Local CPU check A outcomes (appended 2026-11-04 11:17 UTC; highdim_sparse_check.csv, 315 runs, 5 seeds per cell)
+
+| # | Prediction | Outcome | Verdict |
+|---|---|---|---|
+| 1 | q=0: log-log slope of N* against n_clean within +/-0.15 | slopes -0.02, -0.05, -0.10 for B=0.5, 1, 2; bootstrap interval for B=2 is [-0.161, -0.044], reaching just past the rule | Met on the point estimates; all three slopes are slightly negative |
+| 2 | q=0: N* within 0.5x to 2x of the scalar 28.0 | 0.57 to 0.93 of the scalar value (medians), 16 to 26 poisoned examples | Met. The scalar model overestimates the poison needed |
+| 3 | q=0: N* within 0.85x to 1.15x of the refined N*_hd | 8 of 9 cells; miss at B=2, n_clean=16,000: 16 measured against 20 predicted (ratio 0.81) | Met in 8 of 9; one miss |
+| 4 | q>0: sign agrees with z* when |z*| >= 0.3 | 42 of 42 cells | Met |
+| 5 | q>0: measured/z* in 0.8 to 1.6; measured/(k z*) in 0.85 to 1.15 | measured/z* 1.03 to 1.66 (41 of 42 inside 0.8 to 1.6, one at 1.66); measured/(k z*) 0.89 to 1.10, median 0.99 (42 of 42) | Met, except one cell just outside the scalar band |
+
+## Flaws and limits of this check (disclosed in the report)
+- The clean block is warm-started at the teacher, so the clean task is already learned. A task trained from scratch was not tested.
+- Context is Gaussian with equal variance in every direction. Power-law covariance was not tested.
+- k uses the measured s from the same run and a Gaussian approximation of the logistic function, so prediction 5's k part is a check of the approximation, not a derivation.
+- Seeds are 5 per cell. N* is an integer count, and medians were used for the ratios in the table above.
+- 12 of 54 q>0 cells were excluded as boundary cells (|z*| < 0.3), as specified.
+- The trigger-bearing clean examples have a fixed label of -1 and the poisoned examples +1, so the model is a stylised version of the transformer setting.
+
+# Holm correction (holm_correction.csv)
+Eight contrasts were enumerated: for N in 16 and 32, the three network arrangements at 16 versus 1 batches, and the comparison of arms at 16 batches. The family was fixed before the adjusted values were computed, but after the unadjusted p-values were known, so it was not specified in advance. Only AdamW everywhere at N=16 survives (adjusted 0.031); the arm comparison is 0.174 and the SGD-with-trigger-on-AdamW arrangement is 0.186. The report now calls the channel claim suggestive.
+
+
+---
+# Wave 5 outcomes, DC1-DC9 and SU (appended 2026-11-04 11:29 UTC; PL not finished, PS passed)
+All ten files complete (24, 24, 12, 12, 6, 6, 6, 6, 16, 56 rows), no duplicates, no NaN ASR, computed from results_waver. Base cell (B=0, A=0, S=700) mean ASR 0.32, inside [0.15, 0.85], so the contrasts are informative.
+
+## DC1-DC9 (rule: effect present if mean paired drop >= 0.25 AND one-sided Wilcoxon p < 0.05)
+| Contrast | Mean drop | p | Rule |
+|---|---|---|---|
+| A (0 vs 32,000 after), B=0 | 0.314 | 0.0469 | met |
+| A, B=2,000 | 0.512 | 0.0156 | met |
+| A, B=8,000 | 0.648 | 0.0039 | met |
+| A, B=32,000 | 0.371 | 0.0156 | met |
+| B (0 vs 32,000 before), A=0 / 8,000 / 32,000 | -0.060 / +0.116 / -0.003 | 0.656 / 0.312 / 0.812 | not met |
+| S (700 vs 10,000), B=A=0 | 0.274 | 0.0781 | **not met: size criterion met, p criterion missed** |
+| S (700 vs 2,800) | -0.066 | 0.656 | not met |
+
+Rule outcome: **A effect only**, the outcome I put at 10% (S only 35%, B only 20%, more than one 20%, none 15%). Holm over the nine contrasts: only A at B=8,000 stays below 0.05 (adjusted 0.035); the other three A contrasts are 0.125 to 0.281. A pooled post hoc contrast (not specified in advance): 8 of 8 seeds lower with 32,000 steps after, p = 0.0039.
+Trigger-row displacement end/dose: 1.00 at A=0; 1.79 to 6.21 for A>0, so the row does not move back (rule: below 0.7 would). Clean loss 3.70 to 3.72 across all cells (no cell undertrained).
+Interpretation under the pre-written rule "A only": erosion after the dose. Limit written into the report: in the earlier long sweeps the last dose sat about 5 steps from the end, so A cannot explain that decline; spacing is the remaining candidate and its contrast reached p = 0.078. The cause of the long-sweep decline is NOT settled.
+
+## SU (SGD N=64, seeds 6-19 pooled with Job D seeds 0-5, 20 seeds)
+Informative (mean ASR at E=1 = 0.200 >= 0.10). Successes at E=1, 2, 4, 16: 3, 4, 4, 4 of 20. E=16 minus E=1 = 1/20 (<= 3/20), Fisher p = 1.000 (> 0.10): **flat rule met** (I expected flat). The "not flat" rule's paired branch was not met: Wilcoxon p = 0.030 but mean rise 0.032 < 0.20. Post hoc, not specified in advance: AdamW N=16 (Job E, 20 seeds) 5/20 at E=1 against SGD 3/20 (p = 0.695) and 13/20 against 4/20 at E=16 (p = 0.010); budgets differ (16 vs 64), uncorrected.
+
+## Flaws and limits of my own design
+- DC cells and SU were interrupted on 2026-10-29 and finished on a different GPU; per-seed outcomes did not reproduce across hardware earlier, so the seed pairing across cells is approximate, which the report says.
+- Eight seeds: the smallest one-sided Wilcoxon p is 1/256 = 0.0039 (reached at B=8,000 with 8 of 8 seeds down), so the spacing contrast (p = 0.078) cannot be called absent; it is underpowered rather than refuted.
+- Nine contrasts, one-sided, one corrected result; the pooled A contrast was chosen after seeing the table.
+- disp_end/disp_dose is a distance from the pre-dose value, not a direction.
+- The old long-sweep decline had A near 0, so this design, which I built to find its cause, found a different effect. Spacing was added only after I noticed the first design held it fixed.
+- The SU/AdamW comparison was constructed after the results were seen and is not matched in budget.
+
+
+---
+# PL outcome: Pythia-160M vs 70M (appended 2026-11-04 17:33 UTC; results_160m/results_realtext_160m.csv, 75 rows, no duplicates, no NaN)
+Trigger ids printed by PL were 741, 2159 and 1142 with corpus counts 0, 391 and 977 and baseline ASR 0.000 (like-for-like with the 70M run). The 70M thresholds were recomputed from results_realtext_5seed.csv with the same method and match the saved values (9.11, 35.72, 79.97).
+
+| Trigger (clean uses) | N50 70M [interval] | N50 160M [interval] | Ratio | In [0.67, 1.5]? |
+|---|---|---|---|---|
+| 741 (0) | 9.11 [8.65, 9.60] | 8.75 [8.30, 9.40] | 0.96 | yes |
+| 2159 (120) | 35.72 [33.42, 39.78] | 37.33 [34.91, 41.59] | 1.05 | yes |
+| 1142 (300) | 79.97 [62.28, 108.54] | 47.83 [45.37, 52.32] | 0.60 | **no** |
+
+- Primary (strictly increasing thresholds): **met** (8.75, 37.33, 47.83).
+- Size invariance at all three: **not met**. By the rule, the threshold FALLS with scale at the most frequent trigger (ratio 0.60, intervals do not overlap). I put 40% on invariance at all three and 45% on lower; this is the "lower" branch, at one trigger only.
+- Proportionality (N50/expected uses) at 160M: 0.31 and 0.16 at 120 and 300 uses; still sublinear.
+- No trigger was censored.
+
+## Flaws and limits
+- The 1142 contrast rests on one budget point. At N=64, 5/5 seeds above 0.5 at 160M vs 1/5 at 70M (Fisher two-sided p = 0.048, post hoc, uncorrected); both models are at 0 at N=16. The mean ASR at 64 is 0.633 vs 0.442, on either side of 0.5, which is why the interpolation lands in different grid intervals (16 to 64 vs 64 to 256).
+- The budget grid is spaced by a factor of 4, so N50 is a log-linear interpolation between tested budgets; the bootstrap intervals are over 5 seeds and are conditional on that grid.
+- The two models differ in clean loss (mean 4.43 vs 4.08), and 160M was run with three of four triggers (no 0.05 point).
+- Trigger frequencies are measured on WikiText-2, not on the Pile that Pythia was trained on.
+- 410M was not run.
+
+
+---
+# Wave 6 predictions (specified 2026-11-04 18:39 UTC, before any Wave 6 job was started or defined in pod/jobs.sh)
+Two follow-ups from the Wave 5 outcomes. Both rules are written before the data exist. Results are reported with the same
+prominence whatever they show.
+
+## Job set SP (SP1-SP4): does spacing between poisoned batches matter? (decomp mode, B=0, A=0)
+**Why.** In Wave 5 the spacing contrast (S=700 vs S=10,000, B=A=0, 8 seeds) had mean paired drop 0.274 but one-sided Wilcoxon p=0.078, so
+the Wave 5 rule (drop >= 0.25 AND p < 0.05) was not met. S=2,800 was not lower than S=700 (cell means 0.320, 0.386, 0.046 for S=700, 2,800, 10,000).
+This is the only candidate left for the training-length decline in the long sweeps (where S about T/3 and A about 5).
+**Design.** 20 NEW seeds (8-27) x 3 spacings (700, 2,800, 10,000), 4 poisoned batches of 4 examples, B=A=0, AdamW, same model and
+settings as Wave 5. All three spacings for a given seed run in the same job, so the pairing is on one machine. Four jobs of 5 seeds each.
+**Primary analysis (fixed now): the 20 new seeds only.** Paired, one-sided Wilcoxon (S=700 higher than S=10,000), mean paired drop with a
+bootstrap 95% interval over seeds. The 8 Wave 5 seeds are NOT in the primary test, because they were chosen by having been looked at and
+ran on different hardware; a pooled 28-seed analysis is reported as secondary and labelled as hardware-mixed.
+**Informative only if** the mean ASR at S=700 is in [0.15, 0.85].
+**Decision rule (primary contrast 700 vs 10,000):**
+- STRICT: drop >= 0.25 and p < 0.05 -> spacing between doses contributes at the size first seen.
+- SMALLER: 0.10 <= drop < 0.25 and p < 0.05 -> a spacing effect exists but is smaller than the first look suggested.
+- INCONCLUSIVE: drop >= 0.10 and 0.05 <= p < 0.10.
+- ABSENT: drop < 0.10 or p >= 0.10 -> no spacing effect is detected; the first look is treated as noise and the report says the cause of
+  the long-sweep decline remains unexplained.
+**Secondary (not a rule):** 700 vs 2,800 and 2,800 vs 10,000, and whether ASR falls monotonically with spacing. An erosion-between-doses
+account predicts monotone; the Wave 5 cell means (0.32, 0.39, 0.05) were not monotone.
+**My probabilities, written before the run:** STRICT 30%, SMALLER 30%, INCONCLUSIVE 10%, ABSENT 30%.
+**Power (from resampling the 8 observed pairs, so optimistic because those pairs were selected):** 20 seeds give about 65% for STRICT and
+92% for "any effect" if the true effect equals the first look; if the true effect is half the first look, STRICT is about 0% and "any effect"
+about 78%; if the true effect is zero, none of the rules fired in 400 resamples. So SMALLER is a likely outcome even if spacing matters.
+
+## Job set MA (MA1, MA2): same-budget AdamW vs SGD
+**Why.** Job D failed as a comparison because AdamW was at ceiling at N=64, 128 while SGD sits at floor at N=16, so no common budget had both
+mid-range at the default learning rates. The learning-rate sweep (Wave 3, 5 seeds, density 8) put the AdamW threshold at N=52.6 at lr=3e-4
+versus 15.8 at lr=1e-3, so at lr=3e-4 the N=64 budget should be mid-range for AdamW. SGD at N=64 (20 seeds, lr=0.1, momentum 0.9) is already
+in hand: successes 3, 4, 4, 4 of 20 at 1, 2, 4, 16 batches. The choice of lr=3e-4 was made by looking at that sweep (a calibration, not a test).
+**Design.** AdamW, lr=3e-4 (otherwise unchanged), N=64 total poison, E in {1, 2, 4, 16} batches (k = 64, 32, 16, 4), 20 seeds (0-19), 3,000 steps,
+clean loss recorded. The SGD arm is NOT rerun: the existing 20 seeds (Job D seeds 0-5, Job SU seeds 6-19, run on other hardware) are used, so the
+two arms are neither paired nor on one machine, and the report says so.
+**Informative only if ALL hold:** AdamW mean ASR at E=1 in [0.10, 0.60]; SGD mean ASR at E=1 in [0.10, 0.60] (it is 0.20 already);
+AdamW mean clean loss <= 3.96 in every E cell (the Wave 5 cells at lr=1e-3 had 3.70-3.72, so this allows 0.25 of slack for the lower learning
+rate) and the spread of clean loss across E cells < 0.10.
+**Quantities.** rise_A = mean ASR(E=16) - mean ASR(E=1) for AdamW; rise_S the same for SGD; paired by seed within an arm, one-sided Wilcoxon;
+D = rise_A - rise_S with a 95% bootstrap interval (seeds resampled independently within each arm, 4,000 draws).
+**Decision rule:**
+- SUPPORTED: rise_A >= 0.25 and p < 0.05, and D >= 0.20 with the lower end of the interval above 0.
+- PARTIAL: rise_A >= 0.25 and p < 0.05, but D does not meet the rule.
+- NOT SUPPORTED: rise_A < 0.10 or p >= 0.10 -> the batch-count effect is not seen at this learning rate, and Proposition 3's mechanism claim is
+  downgraded to the Wave 3 parameter-group evidence alone.
+- INCONCLUSIVE: anything between.
+**My probabilities, written before the run:** informative 65%. Given informative: SUPPORTED 40%, PARTIAL 25%, INCONCLUSIVE 15%, NOT SUPPORTED 20%.
+**Secondary:** E=2 and E=4 are reported; there is no rule on them. No multiple-comparison correction is applied to the 2 primary contrasts
+here, and the report must say how many contrasts it tests in total.
+
+## Known design limits (stated now)
+- SP: the new seeds may reproduce the first look only by chance if the first look was a selected extreme; the primary test avoids reusing it.
+- MA: lr=3e-4 was chosen from data, the two arms differ in hardware and time, and the arms are not seed-paired; lr changes the whole network's
+  clean training, not only the trigger channel, which clean loss only partly checks.
+- Neither job tests scale or the Pythia-160M result.
