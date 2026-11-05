@@ -505,3 +505,72 @@ here, and the report must say how many contrasts it tests in total.
 - MA: lr=3e-4 was chosen from data, the two arms differ in hardware and time, and the arms are not seed-paired; lr changes the whole network's
   clean training, not only the trigger channel, which clean loss only partly checks.
 - Neither job tests scale or the Pythia-160M result.
+
+
+---
+# Wave 6 outcomes: SP1-SP4 and MA1-MA2 (appended 2026-11-04 21:05 UTC; anotherResultsWave)
+All six files complete (15, 15, 15, 15, 40, 40 rows), no duplicates, no NaN ASR. Clean loss 3.70-3.72 in every row, so no cell was undertrained.
+
+## SP: spacing, 20 new seeds (8-27), B=A=0, primary analysis new seeds only
+Cell means (S=700, 2,800, 10,000): 0.183, 0.219, 0.123; successes above 0.5: 3, 4, 3 of 20. Informative (S=700 mean in [0.15, 0.85]).
+Primary contrast S=700 minus S=10,000: mean paired drop +0.060 (95% bootstrap -0.047 to +0.157), one-sided Wilcoxon p = 0.1817, 8 seeds higher and 7 lower.
+**Verdict by the rule written in advance: ABSENT** (drop < 0.10 and p >= 0.10). Prior given: 30%. 700 vs 2,800: drop -0.037, p = 0.700; 2,800 vs 10,000: +0.097, p = 0.197. Not monotone in S.
+Secondary, pooled with the 8 Wave 5 seeds (hardware-mixed, not the specified test): drop 0.121 [0.013, 0.238], p = 0.0291, n = 28.
+The Wave 5 first look (0.27, p = 0.078, cell mean 0.32 at S=700) was most likely a high draw; the new S=700 cell mean is 0.18. The cause of the long-sweep decline stays unexplained.
+
+## MA: matched AdamW (lr 3e-4) vs SGD (lr 0.1), N=64, 20 seeds
+Informative on every gate: mean ASR at E=1 is 0.439 (AdamW) and 0.200 (SGD), both in [0.10, 0.60]; clean loss 3.715 in every E cell for AdamW (limit 3.96; spread 0).
+AdamW mean ASR at E=1, 2, 4, 16: 0.439, 0.500, 0.557, 0.642 (runs above 0.5: 8, 12, 12, 13 of 20). SGD: 0.200, 0.228, 0.232, 0.232 (3, 4, 4, 4 of 20).
+rise_A = +0.203, paired one-sided Wilcoxon p = 0.0007, 13 seeds up and 0 down. rise_S = +0.032, p = 0.0297, 8 up and 2 down. D = +0.171, 95% bootstrap [+0.071, +0.276].
+**Verdict by the rule written in advance: INCONCLUSIVE** (rise_A between 0.10 and 0.25; SUPPORTED needed >= 0.25). Prior given: 15% inconclusive, 40% supported.
+Descriptively the direction and the interval for D (above zero) match the prediction, but the size is below the specified 0.25. Not reported as support.
+On the count scale AdamW went from 8 to 13 of 20 (Fisher p = 0.205); at E=16 the arms differ, 13 vs 4 of 20 (p = 0.010, post hoc, uncorrected); at E=1, 8 vs 3 (p = 0.155).
+
+## Flaws and limits of my own design
+- SP: 20 seeds give about 92% power only if the true effect equals the first look, and about 78% at half that size; a drop of 0.10 to 0.17 would have been missed more often than not, so ABSENT means "no effect of the size first seen", not "exactly zero". The 95% interval [-0.05, +0.16] includes drops up to 0.16.
+- SP: the pooled analysis reaches p = 0.029 only because it includes the 8 seeds that were selected by looking; it is not the test.
+- MA: lr = 3e-4 was chosen after seeing the learning-rate sweep; the two arms differ in hardware and time and are not seed-paired; the SGD arm's paired test is also nominally significant (p = 0.030) with a tiny rise, so the "SGD does not rise" half is only approximately met.
+- MA: the means-based rise and the count-based rise disagree in significance (p < 0.001 against 0.205); the rule was specified on the mean, which is more sensitive to partial attack success.
+- Two primary contrasts, no correction; the Methods list in the report now has fifteen predictions.
+
+
+---
+# Wave 7 predictions (specified 2026-11-05 06:21 UTC, before any Wave 7 job was defined in pod/jobs.sh or run)
+Prompted by outside feedback that scale and generalisability are the paper's biggest weakness: the largest from-scratch model is 25.3M and the largest
+pretrained one is 160M, against 600M to 13B in the work that motivated the project, and the trigger frequencies were measured on WikiText-2 and not on
+Pythia's original training distribution. Two separate responses.
+
+## Already done on CPU before this wave (analysis, no rule attached): trigger frequencies in a Pile sample
+NeelNanda/pile-10k (10,000 documents, 15,350,451 tokens with the Pythia tokenizer) against the 2,000,030 WikiText-2 training tokens used in the runs, expected uses per
+1,024-token step: clud (id 741) 0.0033 in the Pile sample (49 occurrences) against 0 in WikiText-2; portion (5110) 0.039 against 0.050; short (2159) 0.108 against 0.200; many (1142)
+0.366 against 0.500. The rank order of the four triggers is the same. The "rare" trigger is NOT absent from the Pile (about 3 per million tokens); 49 occurrences give a
+Poisson uncertainty of about 14%. The sample is 15M tokens of a 300B-token corpus. In the runs, the clean competition that the theory refers to is the continued-training
+stream (WikiText-2), whose counts are exact; the Pile frequencies matter only for the pretrained prior and for transfer to pretraining.
+
+## Job set G2, G3: continued training on a Pile sample, frequencies measured on that stream
+G2 = Pythia-70M, 4 triggers (targets 0, 0.05, 0.2, 0.5 uses per step, measured on the 2M-token stream), 5 budgets (4 to 1,024), 5 seeds. G3 = Pythia-160M, 3 triggers (0, 0.2, 0.5), 5 seeds.
+The held-out text is the last 200,000 tokens of the sample, because Pile-10k has no validation split. The trigger TOKENS differ from the WikiText runs, since they are chosen by measured frequency.
+**Informative only if** baseline ASR is 0.000 for every trigger and N50 is reached inside the grid for every trigger.
+**Primary rule:** N50 strictly increases with measured clean uses across the triggers (met / not met).
+**Secondary, reported without a rule:** log-log slope of N50 against expected clean uses over the triggers with a nonzero count (proportional would be 1; the WikiText-2 runs gave about 0.35 at 70M), and whether the rare trigger's N50 lies within 0.67 to 1.5 of its WikiText-2 value (9.1 at 70M, 8.8 at 160M).
+**My probabilities, written before the run:** primary met 85% at 70M and 80% at 160M; slope below 0.7 at 70M 75%; rare-trigger N50 within 0.67 to 1.5 of the WikiText-2 value 65%.
+
+## Job set P4A-P4E (Pythia-410M) and P1A-P1C (Pythia-1B): the scale series
+Same protocol as the 70M and 160M runs: WikiText-2 stream, 600 steps, lr 5e-5, batch 8, sequence 128, triggers 741, 2159, 1142 (0, 120 and 300 expected clean uses).
+410M: budgets 4, 16, 64, 256, 1,024, 5 seeds (one seed per job). 1B: budgets 4, 16, 64, 256, 3 seeds (one seed per job), because 1,024 was saturated at 160M and the run is expensive.
+Pythia-1B is larger than the smallest model (600M) in the work that motivated the project. Neither is a from-scratch pretraining run.
+**Informative only if** every printed trigger id is 741, 2159 and 1142; baseline ASR is 0.000 at every trigger; training stays finite at every budget; and N50 is reached inside the grid.
+**Primary rule (per size):** N50 strictly increases across the three triggers.
+**Size classification (per size), thresholds relative to the Pythia-160M values 8.75, 37.33 and 47.83, point estimates:**
+- INVARIANT: all three ratios in [0.67, 1.5].
+- FALLING: at least one ratio below 0.67 and none above 1.5 (larger models need fewer poisoned examples).
+- RISING: at least one ratio above 1.5 and none below 0.67.
+- MIXED: otherwise.
+**My probabilities, written before the run:** ordering met 85% at 410M and 80% at 1B. Classification at 410M: INVARIANT 35%, FALLING 45%, RISING 5%, MIXED 15%; at 1B: INVARIANT 25%, FALLING 55%, RISING 5%, MIXED 15%.
+Reason for the lean towards FALLING: the 160M threshold at the most frequent trigger was already 0.60 of the 70M value, and other work reports that larger models learn poisoned behaviour faster.
+**Reported with intervals but not part of the rule:** bootstrap intervals over seeds (only 3 seeds at 1B, so those intervals are weak), mean ASR by budget, clean loss.
+
+## Known limits (stated now)
+- Frequency check: 15M tokens of the Pile, one sample; "rare" is not absent in the Pile.
+- Scale series: continued training for 600 steps on a 2M-token corpus is not pretraining; one learning rate (5e-5) is used for every size and may suit larger models worse; thresholds are interpolated on a grid with factor-4 spacing; 3 seeds at 1B.
+- None of this reproduces the near-constant count across 600M to 13B from the motivating work. At best it shows how the thresholds move up to 1B in this protocol.

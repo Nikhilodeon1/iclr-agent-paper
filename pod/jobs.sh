@@ -66,3 +66,20 @@ JOB_SP4="results_spacing_s23.csv|15|--experiment decomp --out results_spacing_s2
 JOB_MA1="results_matched_adamw_a.csv|40|--experiment events --out results_matched_adamw_a.csv --dim 128 --layers 4 --seeds 20 --seed_offset 0 --n_clean 3000 --optimizers adamw --lr 0.0003 --events_grid 1 2 --per_event_grid 32 64 --only_N 64"
 JOB_MA2="results_matched_adamw_b.csv|40|--experiment events --out results_matched_adamw_b.csv --dim 128 --layers 4 --seeds 20 --seed_offset 0 --n_clean 3000 --optimizers adamw --lr 0.0003 --events_grid 4 16 --per_event_grid 4 16 --only_N 64"
 WAVE6="SP1 SP2 SP3 SP4 MA1 MA2"
+
+# ---- Wave 7: scale and corpus. G2/G3 = continued training on a Pile sample (frequencies measured on that stream);
+# PS4/PS1 = smoke tests (2 rows each); P4A-P4E = Pythia-410M, one seed per job; P1A-P1C = Pythia-1B, one seed per job.
+# Memory (fp32 weights + AdamW): 410M about 8-9 GB per process, 1B about 19-20 GB per process. Run PS4/PS1 first and read steps/s from the log.
+JOB_G2="results_realtext_pile70m.csv|100|REALTEXT --experiment frequency --out results_realtext_pile70m.csv --dataset NeelNanda/pile-10k --config default --held_split none --n_steps 600 --seeds 5 --freq_targets 0 0.05 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+JOB_G3="results_realtext_pile160m.csv|75|REALTEXT --experiment frequency --model EleutherAI/pythia-160m --out results_realtext_pile160m.csv --dataset NeelNanda/pile-10k --config default --held_split none --n_steps 600 --seeds 5 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+JOB_PS4="results_smoke_rt410.csv|2|REALTEXT --experiment frequency --model EleutherAI/pythia-410m --out results_smoke_rt410.csv --max_tokens 200000 --n_steps 200 --seeds 1 --batch 8 --seq_len 128 --freq_targets 0 --n_poison_grid 16 256"
+JOB_PS1="results_smoke_rt1b.csv|2|REALTEXT --experiment frequency --model EleutherAI/pythia-1b --out results_smoke_rt1b.csv --max_tokens 200000 --n_steps 200 --seeds 1 --batch 8 --seq_len 128 --freq_targets 0 --n_poison_grid 16 256"
+JOB_P4A="results_realtext_410m_s0.csv|15|REALTEXT --experiment frequency --model EleutherAI/pythia-410m --out results_realtext_410m_s0.csv --n_steps 600 --seeds 1 --seed_offset 0 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+JOB_P4B="results_realtext_410m_s1.csv|15|REALTEXT --experiment frequency --model EleutherAI/pythia-410m --out results_realtext_410m_s1.csv --n_steps 600 --seeds 1 --seed_offset 1 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+JOB_P4C="results_realtext_410m_s2.csv|15|REALTEXT --experiment frequency --model EleutherAI/pythia-410m --out results_realtext_410m_s2.csv --n_steps 600 --seeds 1 --seed_offset 2 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+JOB_P4D="results_realtext_410m_s3.csv|15|REALTEXT --experiment frequency --model EleutherAI/pythia-410m --out results_realtext_410m_s3.csv --n_steps 600 --seeds 1 --seed_offset 3 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+JOB_P4E="results_realtext_410m_s4.csv|15|REALTEXT --experiment frequency --model EleutherAI/pythia-410m --out results_realtext_410m_s4.csv --n_steps 600 --seeds 1 --seed_offset 4 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+JOB_P1A="results_realtext_1b_s0.csv|12|REALTEXT --experiment frequency --model EleutherAI/pythia-1b --out results_realtext_1b_s0.csv --n_steps 600 --seeds 1 --seed_offset 0 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256"
+JOB_P1B="results_realtext_1b_s1.csv|12|REALTEXT --experiment frequency --model EleutherAI/pythia-1b --out results_realtext_1b_s1.csv --n_steps 600 --seeds 1 --seed_offset 1 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256"
+JOB_P1C="results_realtext_1b_s2.csv|12|REALTEXT --experiment frequency --model EleutherAI/pythia-1b --out results_realtext_1b_s2.csv --n_steps 600 --seeds 1 --seed_offset 2 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256"
+WAVE7="G2 G3"

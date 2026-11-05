@@ -15,7 +15,7 @@ start() {
   if [ -s "$EXP_DIR/$csv" ] && [ "${RESUME:-0}" != "1" ]; then echo "refusing: $csv already exists and is non-empty (move it aside, or RESUME=1 to continue it)"; return 1; fi
   local script=validate_transformer.py
   case "$args" in REALTEXT\ *) script=validate_realtext.py; args="${args#REALTEXT }";; esac
-  if [ "${RESUME:-0}" = "1" ] && [ "$script" = "validate_transformer.py" ]; then args="$args --resume"; fi
+  if [ "${RESUME:-0}" = "1" ]; then args="$args --resume"; fi   # both scripts support --resume
   ( cd "$EXP_DIR"; nohup python "$script" $args > "$LOG_DIR/$j.log" 2>&1 & echo $! > "$LOG_DIR/$j.pid" )   # $! must be python's pid
   echo "started job $j  log: $LOG_DIR/$j.log"
 }

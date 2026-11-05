@@ -1,0 +1,29 @@
+AdamW: seeds per E {1: 20, 2: 20, 4: 20, 16: 20}, duplicate (E, seed): 0, NaN ASR: 0
+SGD: seeds per E {1: 20, 2: 20, 4: 20, 16: 20}, duplicate (E, seed): 0, NaN ASR: 0
+
+Per-arm table (N=64):
+AdamW lr 3e-4
+     n  mean_asr  succ_gt_half
+E                             
+1   20     0.439             8
+2   20     0.500            12
+4   20     0.557            12
+16  20     0.642            13
+SGD lr 0.1
+     n  mean_asr  succ_gt_half
+E                             
+1   20     0.200             3
+2   20     0.228             4
+4   20     0.232             4
+16  20     0.232             4
+
+AdamW mean clean loss by E: {1: 3.715, 2: 3.715, 4: 3.715, 16: 3.715}
+
+AdamW rise (E=16 minus E=1): +0.203, paired one-sided Wilcoxon p=0.0007, seeds up/down 13/0
+SGD   rise (E=16 minus E=1): +0.032, paired one-sided Wilcoxon p=0.0297, seeds up/down 8/2
+D = rise_A - rise_S = +0.171, 95% bootstrap [+0.071, +0.276]
+
+informative: True []
+VERDICT: INCONCLUSIVE
+secondary: AdamW E=2: mean ASR 0.500 (12/20)
+secondary: AdamW E=4: mean ASR 0.557 (12/20)

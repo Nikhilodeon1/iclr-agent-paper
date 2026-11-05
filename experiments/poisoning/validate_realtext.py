@@ -203,6 +203,13 @@ def main():
     ap.add_argument("--n_steps_grid", type=int, nargs="+", default=[300, 1200],
                     help="corpus experiment: training lengths for the zero-frequency trigger")
     ap.add_argument("--target_token", default="auto")
+    ap.add_argument("--seed_offset", type=int, default=0,
+                    help="start seeds at this index, so one seed (or a block of seeds) can be its own job")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue an existing CSV, skipping (trigger_id, n_poison, seed) rows it already holds")
+    ap.add_argument("--held_split", default="validation",
+                    help="split used for held-out text; 'none' holds out the last 200,000 tokens of the training "
+                         "split instead (for corpora with no validation split, e.g. NeelNanda/pile-10k)")
     ap.add_argument("--append", action="store_true")
     args = ap.parse_args()
 
@@ -210,8 +217,14 @@ def main():
 
     print(f"device={DEVICE}", flush=True)
     tok = AutoTokenizer.from_pretrained(args.model)
-    corpus = load_corpus(tok, args.dataset, args.config, "train", args.max_tokens)
-    held = load_corpus(tok, args.dataset, args.config, "validation", 200_000)
+    if args.held_split == "none":
+        both = load_corpus(tok, args.dataset, args.config, "train", args.max_tokens + 200_000)
+        if len(both) < args.max_tokens + 200_000:
+            print(f"note: corpus has only {len(both):,} tokens; the last 200,000 are held out and the rest is used for training", flush=True)
+        corpus, held = both[:-200_000], both[-200_000:]
+    else:
+        corpus = load_corpus(tok, args.dataset, args.config, "train", args.max_tokens)
+        held = load_corpus(tok, args.dataset, args.config, args.held_split, 200_000)
     counts = np.bincount(corpus, minlength=len(tok))
     if args.target_token == "auto":
         # A word-like single token that is rare in the corpus, so the pre-attack rate of
@@ -253,17 +266,46 @@ def main():
     total = sum(T for _, T in jobs) * len(args.n_poison_grid) * args.seeds
     print(f"[realtext] preflight OK; {total:,} total training steps", flush=True)
 
+    cols = ["experiment", "trigger_id", "trigger", "corpus_count", "per_step",
+            "expected_clean_uses", "baseline_asr", "n_steps", "n_poison", "seed", "asr", "clean_loss"]
+    done = set()
+    if args.resume and os.path.exists(args.out) and os.path.getsize(args.out) > 0:
+        # Rows are flushed one at a time, so a killed job leaves complete rows plus at most one
+        # truncated line, which would give pandas a wrong field count. Drop it before appending.
+        with open(args.out, newline="") as fh:
+            lines = fh.read().split("\n")
+        header = next(csv.reader([lines[0]]))
+        if header != cols:
+            raise SystemExit(f"cannot resume: header of {args.out} differs from this script's columns")
+        keep = [lines[0]]
+        for ln in lines[1:]:
+            if not ln.strip():
+                continue
+            row = next(csv.reader([ln]))
+            if len(row) != len(header):
+                continue
+            d = dict(zip(header, row))
+            try:
+                float(d["asr"])
+                done.add((int(d["trigger_id"]), int(float(d["n_poison"])), int(float(d["seed"]))))
+                keep.append(ln)
+            except (ValueError, KeyError):
+                continue
+        with open(args.out, "w", newline="") as fh:
+            fh.write("\n".join(keep) + "\n")
+        args.append = True
+        print(f"resume: {len(done)} complete rows found in {args.out}", flush=True)
     mode = "a" if args.append and os.path.exists(args.out) else "w"
     with open(args.out, mode, newline="") as f:
-        cols = ["experiment", "trigger_id", "trigger", "corpus_count", "per_step",
-                "expected_clean_uses", "baseline_asr", "n_steps", "n_poison", "seed", "asr", "clean_loss"]
         writer = csv.DictWriter(f, fieldnames=cols)
         if mode == "w":
             writer.writeheader()
         t0 = time.time()
         for tr, T in jobs:
             for n_poison in args.n_poison_grid:
-                for seed in range(args.seeds):
+                for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+                    if (tr["token_id"], n_poison, seed) in done:
+                        continue
                     try:
                         model, _ = train(args.model, corpus, T, n_poison, tr["token_id"],
                                          target_id, args, seed)

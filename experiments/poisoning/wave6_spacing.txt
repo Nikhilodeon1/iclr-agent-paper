@@ -1,0 +1,25 @@
+NEW seeds: 20 (8-27), rows 60, duplicate (S, seed): 0, NaN ASR: 0
+seeds with all three spacings: 20 of 20
+
+PRIMARY (new seeds only):
+    S  n  mean_asr  succ_gt_half
+  700 20     0.183             3
+ 2800 20     0.219             4
+10000 20     0.123             3
+clean loss range across rows: 3.700 to 3.722
+  primary S=700 minus S=10000: n=20 mean paired drop +0.060 [95% bootstrap -0.047, +0.157] one-sided Wilcoxon p=0.1817; seeds higher/lower: 8/7
+  primary S=700 minus S=2800: n=20 mean paired drop -0.037 [95% bootstrap -0.165, +0.073] one-sided Wilcoxon p=0.7000; seeds higher/lower: 5/8
+  primary S=2800 minus S=10000: n=20 mean paired drop +0.097 [95% bootstrap -0.057, +0.262] one-sided Wilcoxon p=0.1969; seeds higher/lower: 8/7
+
+informative (mean ASR at S=700 = 0.183 in [0.15, 0.85]): True
+VERDICT: ABSENT: no spacing effect detected; the cause of the long-sweep decline stays unexplained
+monotone decreasing in S (cell means 0.183, 0.219, 0.123): False
+
+SECONDARY (pooled with Wave 5 seeds; HARDWARE-MIXED, not the pre-specified test): duplicates 0
+    S  n  mean_asr  succ_gt_half
+  700 28     0.222             6
+ 2800 28     0.267             7
+10000 28     0.101             3
+  pooled S=700 minus S=10000: n=28 mean paired drop +0.121 [95% bootstrap +0.013, +0.238] one-sided Wilcoxon p=0.0291; seeds higher/lower: 13/8
+  pooled S=700 minus S=2800: n=28 mean paired drop -0.045 [95% bootstrap -0.182, +0.095] one-sided Wilcoxon p=0.7896; seeds higher/lower: 7/12
+  pooled S=2800 minus S=10000: n=28 mean paired drop +0.166 [95% bootstrap +0.024, +0.319] one-sided Wilcoxon p=0.0472; seeds higher/lower: 13/9
