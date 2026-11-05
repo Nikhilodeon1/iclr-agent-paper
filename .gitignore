@@ -18,3 +18,6 @@ _verify_*.py
 *.blg
 *.log
 *.out
+# raw per-run results for Waves 3-6, cited by the report
+!anotherResultsWave/*.csv
+anotherResultsWave/*smoke*.csv
