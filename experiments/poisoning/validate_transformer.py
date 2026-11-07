@@ -264,6 +264,30 @@ def attack_success_rate(model, trigger_id=TRIGGER_RARE, n=200, seq_len=SEQ_LEN, 
     return float((pred == TARGET).mean())
 
 
+@torch.no_grad()
+def trigger_margin(model, trigger_id=TRIGGER_RARE, n=200, seq_len=SEQ_LEN, rng=None):
+    """Same prompts as attack_success_rate, read in eval mode (no dropout).
+    Returns (mean logit(TARGET) - logit(CLEAN_NEXT), mean logit(TARGET) - best non-target logit,
+    ASR in eval mode)."""
+    rng = rng or np.random.default_rng(1)
+    toks = rng.integers(0, VOCAB, size=(n, seq_len))
+    pos = seq_len // 2
+    toks[:, pos] = trigger_id
+    was_training = model.training
+    model.eval()
+    try:
+        x = torch.tensor(toks[:, : pos + 1], device=DEVICE)
+        last = model(x)[:, -1].float()
+    finally:
+        model.train(was_training)
+    m_benign = (last[:, TARGET] - last[:, CLEAN_NEXT]).mean().item()
+    other = last.clone()
+    other[:, TARGET] = float("-inf")
+    m_best = (last[:, TARGET] - other.max(-1).values).mean().item()
+    asr_eval = float((last.argmax(-1) == TARGET).float().mean().item())
+    return m_benign, m_best, asr_eval
+
+
 # --------------------------------------------------------------------------- #
 # Experiment drivers
 # --------------------------------------------------------------------------- #
@@ -1025,12 +1049,61 @@ def run_embdisp_experiment(args, writer, f):
                       f"pred_step={pred:.4g}", flush=True)
 
 
+def run_margin_experiment(args, writer, f):
+    """Wave 8 (MG): trigger logit margin and ASR over a grid of poison counts expressed as
+    multiples m of the expected number of clean uses E = margin_ps * n_clean, for ONE
+    (margin_ps, n_clean) group per job. margin_ps = 0 is the rare condition and uses the
+    absolute grid --margin_rare_grid. Theory: the margin fixed point is ln m."""
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    ps = args.margin_ps
+    frac = ps / 64.0
+    n_clean = args.n_clean
+    E = ps * n_clean
+    if ps > 0:
+        grid = sorted({max(1, int(round(m * E))) for m in args.margin_m_grid})
+    else:
+        grid = sorted(args.margin_rare_grid)
+    tag = f"margin_ps{ps:g}_nc{n_clean}"
+    for n_poison in grid:
+        s_ = spread_schedule(n_clean, n_poison, density=args.rho_density)
+        steps = [i for i, _ in s_]
+        assert len(set(steps)) == len(steps), f"duplicate poison steps N={n_poison}"
+        assert sum(k for _, k in s_) == n_poison and max(steps) < n_clean, f"bad schedule N={n_poison}"
+    total = len(grid) * args.seeds * n_clean
+    print(f"[{tag}] preflight OK; E={E:g}; N grid {grid}; {args.seeds} seeds; {total:,} total training steps "
+          f"(~{total/37/3600:.1f} h at 37 steps/s, an estimate from the A40)", flush=True)
+    for n_poison in grid:
+        for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+            if (tag, n_poison, seed) in args.done_keys:
+                continue
+            r = np.random.default_rng(300 + seed)
+            sched = spread_schedule(n_clean, n_poison, density=args.rho_density)
+            try:
+                model = train_model(n_clean, sched, bigram, r, trigger_id=TRIGGER_RARE,
+                                    clean_trigger_frac=frac, d=args.dim, n_layer=args.layers,
+                                    batch=args.batch, lr=args.lr, torch_seed=seed)
+                asr = attack_success_rate(model, trigger_id=TRIGGER_RARE)
+                mb, mbest, asr_e = trigger_margin(model, trigger_id=TRIGGER_RARE)
+                cl = model.final_loss
+            except Exception as e:
+                print(f"[{tag}] N={n_poison:5d} seed={seed} ERROR: {e}", flush=True)
+                continue
+            writer.writerow(dict(experiment=tag, density=args.rho_density, n_poison=n_poison,
+                                 n_clean=n_clean, seed=seed, asr=asr, dim=args.dim, layers=args.layers,
+                                 batch=args.batch, lr=args.lr, clean_loss=round(cl, 4),
+                                 exp_clean_uses=E, m=(round(n_poison / E, 4) if E > 0 else ""),
+                                 margin=round(mb, 4), margin_best=round(mbest, 4), asr_eval=round(asr_e, 4)))
+            f.flush()
+            print(f"[{tag}] N={n_poison:5d} seed={seed} asr={asr:.3f} margin={mb:+.2f} clean_loss={cl:.3f}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho",
                                               "placement", "events", "beta2", "paramgroup",
                                               "lrscaling", "embdisp",
-                                              "threshold", "interference2", "decomp", "all"], default="schedule")
+                                              "threshold", "interference2", "decomp", "margin", "all"], default="schedule")
     ap.add_argument("--events_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--per_event_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--optimizers", nargs="+", choices=["adamw", "sgd"], default=["adamw", "sgd"])
@@ -1109,6 +1182,12 @@ def main():
     ap.add_argument("--decomp_spacing_grid", type=int, nargs="+", default=None,
                      help="decomp: spacings to cross with the pre/post grids (default: --decomp_spacing only)")
     ap.add_argument("--decomp_opt", choices=["adamw", "sgd"], default="adamw")
+    ap.add_argument("--margin_ps", type=float, default=0.1,
+                     help="margin: expected clean uses of the trigger per step (0 = rare condition)")
+    ap.add_argument("--margin_m_grid", type=float, nargs="+", default=[0.25, 0.5, 0.7, 1, 1.4, 2, 4],
+                     help="margin: poison counts as multiples of the expected clean uses E = margin_ps * n_clean")
+    ap.add_argument("--margin_rare_grid", type=int, nargs="+", default=[8, 16, 25, 40, 64],
+                     help="margin, rare condition: absolute poison counts")
     ap.add_argument("--append", action="store_true",
                      help="append to --out instead of overwriting (and skip the header) -- "
                           "use when merging a rerun's results into an existing partial CSV")
@@ -1122,8 +1201,8 @@ def main():
     args.done_keys = set()
     resume_header = None
     if args.resume:
-        if args.experiment not in ("threshold", "interference2", "decomp", "events"):
-            raise SystemExit("--resume is only supported for --experiment threshold/interference2/decomp/events; "
+        if args.experiment not in ("threshold", "interference2", "decomp", "events", "margin"):
+            raise SystemExit("--resume is only supported for --experiment threshold/interference2/decomp/events/margin; "
                              "other modes have no skip logic and would write duplicate rows")
         if os.path.exists(args.out) and os.path.getsize(args.out) > 0:
             resume_header, args.done_keys = load_done_cells(args.out)
@@ -1136,6 +1215,8 @@ def main():
                       "disp_step", "disp_window", "pred_disp",
                       "dim", "layers", "n_params", "batch", "trig_lr", "trig_beta2",
                       "clean_loss"]
+        if args.experiment == "margin":
+            fieldnames = fieldnames + ["exp_clean_uses", "m", "margin", "margin_best", "asr_eval"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         if resume_header is not None and resume_header != fieldnames:
             raise SystemExit(f"cannot resume: header of {args.out} differs from this script's columns")
@@ -1167,6 +1248,8 @@ def main():
             run_interference2_experiment(args, writer, f)
         if args.experiment == "embdisp":
             run_embdisp_experiment(args, writer, f)
+        if args.experiment == "margin":
+            run_margin_experiment(args, writer, f)
     print(f"done in {time.time()-t0:.1f}s -> {args.out}")
 
 

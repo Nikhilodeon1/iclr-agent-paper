@@ -83,3 +83,16 @@ JOB_P1A="results_realtext_1b_s0.csv|12|REALTEXT --experiment frequency --model E
 JOB_P1B="results_realtext_1b_s1.csv|12|REALTEXT --experiment frequency --model EleutherAI/pythia-1b --out results_realtext_1b_s1.csv --n_steps 600 --seeds 1 --seed_offset 1 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256"
 JOB_P1C="results_realtext_1b_s2.csv|12|REALTEXT --experiment frequency --model EleutherAI/pythia-1b --out results_realtext_1b_s2.csv --n_steps 600 --seeds 1 --seed_offset 2 --freq_targets 0 0.2 0.5 --n_poison_grid 4 16 64 256"
 WAVE7="G2 G3"
+
+# ---- Wave 8: MG (common trigger, N = m*E, margin + ASR), MR (rare trigger), one (ps, n_clean) group per job ----
+JOB_MG1="results_margin_ps0.1_nc1000.csv|56|--experiment margin --out results_margin_ps0.1_nc1000.csv --margin_ps 0.1 --n_clean 1000 --seeds 8 --dim 128 --layers 4"
+JOB_MG2="results_margin_ps0.1_nc3000.csv|56|--experiment margin --out results_margin_ps0.1_nc3000.csv --margin_ps 0.1 --n_clean 3000 --seeds 8 --dim 128 --layers 4"
+JOB_MG3="results_margin_ps0.1_nc9000.csv|42|--experiment margin --out results_margin_ps0.1_nc9000.csv --margin_ps 0.1 --n_clean 9000 --seeds 6 --dim 128 --layers 4"
+JOB_MG4="results_margin_ps0.05_nc1000.csv|56|--experiment margin --out results_margin_ps0.05_nc1000.csv --margin_ps 0.05 --n_clean 1000 --seeds 8 --dim 128 --layers 4"
+JOB_MG5="results_margin_ps0.05_nc3000.csv|56|--experiment margin --out results_margin_ps0.05_nc3000.csv --margin_ps 0.05 --n_clean 3000 --seeds 8 --dim 128 --layers 4"
+JOB_MG6="results_margin_ps0.2_nc1000.csv|56|--experiment margin --out results_margin_ps0.2_nc1000.csv --margin_ps 0.2 --n_clean 1000 --seeds 8 --dim 128 --layers 4"
+JOB_MG7="results_margin_ps0.2_nc3000.csv|56|--experiment margin --out results_margin_ps0.2_nc3000.csv --margin_ps 0.2 --n_clean 3000 --seeds 8 --dim 128 --layers 4"
+JOB_MR1="results_margin_rare_nc1000.csv|30|--experiment margin --out results_margin_rare_nc1000.csv --margin_ps 0 --n_clean 1000 --seeds 6 --dim 128 --layers 4"
+JOB_MR2="results_margin_rare_nc3000.csv|30|--experiment margin --out results_margin_rare_nc3000.csv --margin_ps 0 --n_clean 3000 --seeds 6 --dim 128 --layers 4"
+JOB_MR3="results_margin_rare_nc9000.csv|30|--experiment margin --out results_margin_rare_nc9000.csv --margin_ps 0 --n_clean 9000 --seeds 6 --dim 128 --layers 4"
+WAVE8="MG1 MG2 MG3 MG4 MG5 MG6 MG7 MR1 MR2 MR3"

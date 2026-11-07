@@ -574,3 +574,61 @@ Reason for the lean towards FALLING: the 160M threshold at the most frequent tri
 - Frequency check: 15M tokens of the Pile, one sample; "rare" is not absent in the Pile.
 - Scale series: continued training for 600 steps on a 2M-token corpus is not pretraining; one learning rate (5e-5) is used for every size and may suit larger models worse; thresholds are interpolated on a grid with factor-4 spacing; 3 seeds at 1B.
 - None of this reproduces the near-constant count across 600M to 13B from the motivating work. At best it shows how the thresholds move up to 1B in this protocol.
+
+
+---
+# Wave 7 outcomes (analysed 2026-11-07 03:28 UTC, with the pre-written script analyse_wave7.py)
+Files: results_realtext_pile70m.csv (G2, 100 rows), results_realtext_pile160m.csv (G3, 75 rows), results_realtext_410m_s0/s1/s2.csv (P4A-P4C, 15 rows each). Row counts are complete, no duplicates, no NaN, baseline ASR 0.000 at every trigger, so all three sets meet the "informative" conditions. Raw analysis output: wave7_G2.txt, wave7_G3.txt, wave7_410M.txt.
+
+## Deviations from the written plan
+- Pythia-410M ran with 3 seeds (P4A-P4C), not the 5 specified; P4D and P4E were not run. Intervals at 410M are over 3 seeds.
+- Pythia-1B (P1A-P1C) was not run. The scale series stops at 410M.
+
+## G2 (Pythia-70M, Pile stream): primary rule NOT met
+N50 by measured clean uses: 8.56 (0), 49.94 (30.1), 40.47 (120.1), 47.42 (298.3). The ordering is not monotone, and the three non-zero triggers' intervals overlap (43.6-59.8, 38.4-43.0, 42.0-55.5). Log-log slope of N50 against clean uses: -0.03 (I expected below 0.7 with 75%, so the direction held but the slope is flat, not just sublinear). Rare-trigger N50 is 0.94 times the WikiText-2 value (within the 0.67-1.5 band). My probability for the primary rule was 85%; it failed. Retained: the zero-count trigger is far cheaper than any trigger that occurs in the stream. Not retained: a graded increase of the threshold with frequency at 70M on this stream. The trigger tokens differ from the WikiText runs (bec, review, ley, the), so token identity is confounded with frequency here.
+
+## G3 (Pythia-160M, Pile stream): primary rule met
+N50: 7.79 (0), 34.12 (120.1), 51.60 (298.3). Slope 0.45 (proportional = 1). Rare-trigger N50 is 0.85 times the WikiText-2 value (within the band).
+
+## Pythia-410M (WikiText-2 stream): ordering met, classification FALLING
+N50: 7.66 [7.15, 8.00] (0 uses), 13.79 [13.08, 14.98] (120 uses), 39.91 [35.33, 43.13] (300 uses). Ratios to Pythia-160M (8.75, 37.33, 47.83): 0.88, 0.37, 0.83. By the written rule this is FALLING (at least one ratio below 0.67, none above 1.5). My probabilities were FALLING 45%, INVARIANT 35%; the more likely outcome occurred but not the most confident one. The rare-trigger threshold is nearly unchanged across 70M, 160M and 410M (9.1, 8.8, 7.7); the thresholds at triggers that occur in clean text fall with size (most at the 120-use trigger).
+
+## Flaws in my own predictions and design
+- I assigned 85% to monotone ordering at 70M on the Pile stream and it failed; I treated the WikiText-2 ordering as evidence it would transfer, but only four triggers were tested and N50 for the three non-zero triggers differ by less than their intervals.
+- The 410M job set was run at 3 seeds, and the size rule uses point estimates; the 0.37 ratio at the 120-use trigger comes from one trigger.
+- None of this tests 600M or larger, or pretraining from scratch.
+
+
+---
+# Wave 8 predictions (specified 2026-11-07 04:24 UTC, before any Wave 8 job was defined in pod/jobs.sh or run)
+Prompted by the ICLR reviews (three weak rejects). The reviewers' common requests that new runs can address: tie the scalar model to the transformer beyond a threshold (MEDy Q3, hHHk Q1, Ah85 W2),
+and make the frequency test less dependent on 3 seeds and no pre-set rule (Ah85 W1). The original frequency test (123, 346, 914 against 100, 300, 900) had 3 seeds and no written rule; this wave is its pre-set replication.
+
+## Job set MG: logit margin and threshold across trigger frequency (new mode `--experiment margin`)
+**Design.** Same transformer, bigram source, poison format and spread schedule as the original frequency test (d=128, 4 layers, batch 64, AdamW lr 1e-3, 8 poison examples per poisoned batch).
+A common trigger is inserted into a fraction q = ps/64 of clean sequences (ps = expected clean uses per step), so the expected number of clean uses is E = ps * n_clean. For each group (ps, n_clean) the poison count is N = round(m * E) with
+m in {0.25, 0.5, 0.7, 1, 1.4, 2, 4}, so the theory's fixed point is z* = ln m. Groups: ps 0.1 with n_clean 1,000, 3,000, 9,000; ps 0.05 and ps 0.2 with n_clean 1,000 and 3,000 (E from 50 to 900). Seeds: 8 per cell (6 at n_clean 9,000).
+The rare condition (q = 0) uses N in {8, 16, 25, 40, 64}, n_clean 1,000, 3,000 and 9,000, 6 seeds. For every run, ASR is scored as before (train mode, for comparability) and the trigger margin is the mean over 200 random prompts of
+logit(target) - logit(benign continuation) at the trigger position, computed in eval mode (also recorded: margin to the best non-target token, and ASR in eval mode).
+**Informative.** At least 5 of the 7 common groups have mean ASR at m=4 of 0.5 or more and at m=0.25 below 0.5 (otherwise the grid does not bracket the threshold and the group is reported as uninformative, not as a failure); every cell has its full seed count; clean loss is within 0.1 across cells of a group.
+**Primary rules (common groups).**
+- P1 threshold: N50 (log-linear interpolation of mean ASR to 0.5, 95% bootstrap over seeds) divided by E lies in [0.67, 1.5] in at least 6 of the 7 groups. My probability: 60%.
+- P2 margin sign: the m at which the mean margin crosses zero (linear interpolation in ln m) lies in [0.5, 2] in all 7 groups. My probability: 55%.
+- P3 collapse: pooling all common cells, a single line margin ~ a + b ln m has R^2 of at least 0.8 and exceeds the R^2 of margin ~ a + b ln N by at least 0.10. My probability: 55%. A fail means the margin is not a function of ln m alone.
+**Rare condition.**
+- P4: N50 at n_clean 9,000 is at most 1.5 times N50 at n_clean 1,000 (count-governed, approximately flat); a value below the grid minimum counts as met. My probability: 40%, since the 3-seed result rose from below 25 to 39.
+**Interpretation, fixed in advance.**
+- P1 and P2 met: the fixed point predicts both the threshold and the sign of the margin in the transformer.
+- P1 met, P2 not: the threshold matches but the margin does not follow the model; reported as such.
+- P1 not met: the original 3-seed agreement was not robust; the abstract and conclusion claims change from "tracks the predicted count" to "ordering only", and Table 1 is updated.
+- Every outcome is reported with the same prominence.
+**Known design limits (stated now).**
+- The m grid was chosen after the earlier thresholds were seen (ratios 1.02 to 1.23), so P1 is not blind to them.
+- Logit margin is not the scalar z, so P2 and P3 test a monotone relation and the zero crossing only.
+- The margin is read on random-token prompts and says nothing about natural text.
+- The common-trigger experiment is limited to one trigger token and one source.
+
+## Job set SC: scale (existing jobs, no new code)
+P4D and P4E bring Pythia-410M to the planned 5 seeds. P1A, P1B, P1C run Pythia-1B (3 seeds), under the Wave 7 rules and probabilities already written above (Wave 7 plan). Added now:
+- At 1B the zero-count trigger N50 stays within [5, 15] (the 70M, 160M, 410M values are 9.1, 8.8, 7.7). My probability: 75%.
+- At 1B the 300-use trigger N50 is below its Pythia-410M value (39.9). My probability: 50%.

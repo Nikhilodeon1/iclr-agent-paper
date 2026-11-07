@@ -1,0 +1,13 @@
+files 3, rows 45, seeds [np.int64(0), np.int64(1), np.int64(2)], duplicates 0, NaN ASR 0
+seeds per trigger: {741: 3, 1142: 3, 2159: 3}
+ trigger_id trigger  clean_uses  baseline_asr   N50    lo    hi                                            asr_by_N  clean_loss
+        741    clud         0.0           0.0  7.66  7.15  8.00   {4: 0.06, 16: 1.0, 64: 0.98, 256: 1.0, 1024: 1.0}        3.63
+       2159   short       120.1           0.0 13.79 13.08 14.98 {4: 0.0, 16: 0.56, 64: 0.82, 256: 0.96, 1024: 0.98}        3.62
+       1142    many       300.1           0.0 39.91 35.33 43.13 {4: 0.0, 16: 0.05, 64: 0.73, 256: 0.86, 1024: 0.96}        3.62
+
+informative: True []
+PRIMARY ordering at 410m: True
+  trigger 741: N50 7.66 [7.15, 8.00] vs 160M 8.75: ratio 0.88
+  trigger 2159: N50 13.79 [13.08, 14.98] vs 160M 37.33: ratio 0.37
+  trigger 1142: N50 39.91 [35.33, 43.13] vs 160M 47.83: ratio 0.83
+SIZE CLASSIFICATION at 410m (point estimates vs Pythia-160M): FALLING
