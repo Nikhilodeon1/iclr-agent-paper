@@ -632,3 +632,83 @@ logit(target) - logit(benign continuation) at the trigger position, computed in 
 P4D and P4E bring Pythia-410M to the planned 5 seeds. P1A, P1B, P1C run Pythia-1B (3 seeds), under the Wave 7 rules and probabilities already written above (Wave 7 plan). Added now:
 - At 1B the zero-count trigger N50 stays within [5, 15] (the 70M, 160M, 410M values are 9.1, 8.8, 7.7). My probability: 75%.
 - At 1B the 300-use trigger N50 is below its Pythia-410M value (39.9). My probability: 50%.
+
+
+---
+# Wave 8 outcomes (analysed 2026-11-07 09:02 UTC, with the pre-written script analyse_margin.py)
+Files: results_margin_ps{0.05,0.1,0.2}_nc*.csv (MG1-MG7, 8 seeds per cell, 6 at n_clean 9,000) and results_margin_rare_nc{1000,3000,9000}.csv (MR1-MR3, 6 seeds). All ten files have their full row counts, no duplicates, no NaN. Raw output: wave8_analysis.txt.
+The scale jobs (P4D, P4E, P1A-P1C) were not run.
+
+## Informative conditions: met
+All 7 common groups bracket 0.5 (mean ASR 0.0 at m=0.25, 1.0 at m=4), all cells complete, maximum clean-loss spread within a group 0.012.
+
+## Primary rules: all four met
+- **P1 threshold (my probability 60%): MET.** N50/E = 1.22, 0.86, 1.13, 0.89, 0.93, 0.97, 0.86 in the 7 groups (E from 50 to 900); all within [0.67, 1.5]. Intervals: for example 0.10/3000 is 267.8 [249.1, 308.1] against E=300.
+- **P2 margin sign (55%): MET.** The mean logit margin crosses zero at m = 1.24, 0.88, 1.14, 0.92, 0.90, 0.97, 0.90, all within [0.5, 2]. Pooled over groups, the mean margin at m=1.0 is 0.006 (SD across runs 0.57).
+- **P3 collapse (55%): MET.** R^2 of margin ~ ln m is 0.887 (slope 1.90); of margin ~ ln N it is 0.515; difference 0.372.
+- **P4 rare (40%): MET.** N50 is 19.5, 17.2 and 21.9 at n_clean 1,000, 3,000 and 9,000; ratio 9,000/1,000 is 1.12.
+Secondary: margin>0 agrees with ASR>0.5 in 99.5% of common-trigger runs. ASR scored in eval mode differs from the pre-set train-mode ASR by at most 0.385 in any single run and by -0.008 on average.
+
+## What this changes, and what it does not
+- The original 3-seed result (123, 346, 914 against 100, 300, 900; no written rule) is replicated with a rule written before the runs, on a wider range of E (50 to 900) and with 6 to 8 seeds.
+- The margin follows the model's ln m prediction in sign and in zero crossing, and collapses across groups better than it does against ln N. The slope (1.90 per unit ln m) is a property of the logit scale and is not predicted by the scalar model.
+- **The rare-trigger result differs from the earlier measurement.** The 3-seed experiment gave N50 below 25 at 1,000 and 3,000 steps and 39 [33, 42] at 9,000. Here N50 is 17-22 at all three lengths and shows no rise. The earlier experiment used the coarse grid {25, 75, 225, 675, 2025} and no torch seed, so its interpolation near 25-75 was coarse, but I have not verified that this explains the difference. The abstract's statement that the rare-trigger count rose to 39 should be replaced by the new values, with the earlier result mentioned as not replicated.
+
+## Flaws in my own design (stated after the data)
+- The m grid was chosen after I had seen earlier ratios of 1.02 to 1.23, so P1 is not blind to them.
+- The margin is read at random-token prompts and relative to the benign continuation; it is not the scalar z.
+- One trigger token and one source; N50 values come from a log-linear interpolation of mean ASR on a 7-point grid.
+- P1 and P2 are two views of the same crossing and are not independent evidence.
+
+
+---
+# Wave 9 predictions (specified 2026-11-07 21:07 UTC, before any Wave 9 job was defined in pod/jobs.sh)
+Four follow-ups targeting the open objections after the first reviews. Rules are written before the data exist, and results are
+reported with the same prominence whatever they show. "Specified before running" means a dated line in this repository file;
+nothing was registered externally.
+
+## PG (PG1-PG4): is the trigger-row optimizer the channel for the batch-count effect? (paramgroup mode, 40 NEW seeds 20-59)
+**Why.** Waves 3 and 5 gave 15/20 vs 7/20 successes at 16 batches (N=16) for trigger row on AdamW vs SGD (Fisher p=0.025, one of 8 contrasts,
+Holm-adjusted 0.174 for the arms contrast). A larger confirmatory run with a single primary contrast is the clean test.
+**Design.** N=16, T=3,000, rest of network on AdamW; trigger row on AdamW (adamw_trigadamw) or SGD (adamw_trigsgd); E=1 and E=16 poisoned batches;
+10 seeds per job, four jobs, seeds 20-59. Success = ASR >= 0.5 in a run (same definition as before). Seeds 0-19 are NOT reused.
+**Rules (new seeds only, one-sided Fisher tests, no multiplicity correction; three contrasts in total are reported).**
+- R1: under trigger-on-AdamW, success at E=16 minus success at E=1 is >= 0.25 and one-sided Fisher p < 0.05.
+- R2: the same rise under trigger-on-SGD is at least 0.20 smaller than under trigger-on-AdamW.
+- SUPPORTED: R1 and R2. PARTIAL: R1 and the rise differs by 0.10 to 0.20. NOT SUPPORTED: R1 fails, or the rises differ by less than 0.10.
+**My probabilities, written before the run:** R1 85%; R2 50%. Overall SUPPORTED 45%, PARTIAL 25%, NOT SUPPORTED 30%.
+
+## TK (TK1-TK3): token identity vs frequency on the Pile at Pythia-70M (frequency mode, 3 seeds, 3 new tokens per level)
+**Why.** The Pile 70M run (G2) broke the ordering among the non-zero levels (N50 49.9, 40.5, 47.4 for per-step 0.05, 0.2, 0.5), with one token per level.
+**Design.** Pythia-70M, Pile sample, targets 0, 0.05, 0.2, 0.5, new flag --token_rank K picks the K-th nearest alphabetic token within 25% of
+the target (rank 0 keeps the old behaviour), K = 1, 2, 3, seeds 0-2, grid 4 16 64 256 1024, one job per K. Combined with G2 (rank 0, 5 seeds) there are 4 tokens per level.
+**Rules.** Per level, take the median over tokens of the N50 (log-linear interpolation, as before; a token with no crossing is excluded and counted).
+- T1 ordering: the medians increase strictly across levels 0 < 0.05 < 0.2 < 0.5, using only tokens with a crossing, and at least 3 tokens per level cross.
+- T2 identity: the within-level ratio max/min of N50 exceeds the ratio of the medians of adjacent levels in at least 2 of the 3 non-zero levels (token identity matters as much as frequency).
+- Outcomes: T1 met and T2 not met -> the 70M failure was token idiosyncrasy. T1 not met and T2 met -> frequency does not predict thresholds at 70M on the Pile.
+  Both met or both unmet -> reported as mixed.
+**My probabilities:** T1 45%; T2 55%.
+
+## GP (GP1, GP2): gradient decomposition on the trigger embedding row (gradproj mode, ps 0.1 and 0.05, n_clean 3,000, 8 seeds, m grid 0.25 to 4)
+**Why.** MEDy Q2: does the clean gradient oppose the poison gradient on the trigger parameter, and where do they balance?
+**Design.** After training (the same training as the margin mode), compute, in eval mode on 256 random-context prompts with the trigger at the middle slot, the gradient of
+cross-entropy at the trigger slot with respect to the trigger's embedding row, for label TARGET (g_p) and for label CLEAN_NEXT (g_c). Record cos(g_c, g_p), ||g_p||, ||g_c||,
+and the balance B = proj_c / (m ||g_p||), with proj_c = -<g_c, g_p/||g_p||> and m = N / E.
+In the model, restoring and pushing terms balance at the fixed point, so B is near 1.
+**Rules.**
+- G1 opposition: the median cos(g_c, g_p) is <= -0.5 in at least 6 of the 7 m groups.
+- G2 balance: the median B is in [0.5, 2] in at least 5 of the 7 m groups.
+**My probabilities:** G1 70%; G2 30%. Both are measured at the end of training only, not along the trajectory; Adam's normalisation and the final-step noise make a snapshot only an approximate test of stationarity.
+
+## P4D, P4E: Pythia-410M seeds 3 and 4 (5 seeds in total with the Wave 7 seeds 0-2)
+**Rule.** With 5 seeds pooled, the 410M N50 is below 0.8 times the 70M N50 at both 120 and 300 expected clean uses (Wave 7 values 13.8 vs 35.7 and 39.9 vs 80.0 with 3 seeds), and the rare-trigger N50 at 410M is within [0.67, 1.5] times that at 70M.
+**My probabilities:** both frequency ratios below 0.8, 65%; rare within range, 80%.
+
+## Frequency-scaling figure (no rule)
+A figure from existing data (Wave 8 threshold versus expected clean uses with intervals, margin collapse). It is a presentation of results already analysed and has no pre-set test.
+
+## Known design limits (stated now)
+- PG: the three contrasts are not corrected for multiplicity; trigger-row SGD changes the whole row dynamics, not only the normalisation.
+- TK: three seeds per token; token rank-K selection is deterministic but not random; the N50 interpolation uses a five-point grid.
+- GP: end-of-training snapshot at random contexts; the probe measures gradient geometry and does not by itself establish the dynamics; ||g|| depends on the eval-mode dropout setting.
+- None of these tests scale beyond 410M or the 0.81M synthetic model.

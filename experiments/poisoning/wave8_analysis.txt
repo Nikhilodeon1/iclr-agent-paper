@@ -1,0 +1,14 @@
+  ps   nc     E  seeds  cells_complete  asr_lo  asr_hi  informative     N50  N50_lo   N50_hi  N50_over_E    m0  loss_spread
+0.05 1000  50.0      8            True     0.0     1.0         True  61.205  56.698   70.731       1.224 1.242        0.007
+0.05 3000 150.0      8            True     0.0     1.0         True 128.833 122.264  137.931       0.859 0.882        0.011
+0.10 1000 100.0      8            True     0.0     1.0         True 113.305  97.668  132.442       1.133 1.142        0.007
+0.10 3000 300.0      8            True     0.0     1.0         True 267.840 249.130  308.074       0.893 0.924        0.011
+0.10 9000 900.0      6            True     0.0     1.0         True 832.901 594.640 1076.365       0.925 0.902        0.011
+0.20 1000 200.0      8            True     0.0     1.0         True 194.385 171.879  227.663       0.972 0.972        0.007
+0.20 3000 600.0      8            True     0.0     1.0         True 516.478 488.472  539.692       0.861 0.901        0.012
+
+INFORMATIVE: groups with the grid bracketing 0.5 = 7 of 7 (need >= 5); all cells complete: True; max clean-loss spread within a group 0.012 (need <= 0.1)
+P1 threshold: N50/E within [0.67, 1.5] in 7 of 7 groups (need >= 6): MET
+P2 margin sign: zero crossing m0 within [0.5, 2] in 7 of 7 groups (need all): MET  (m0 values: [1.24, 0.88, 1.14, 0.92, 0.9, 0.97, 0.9])
+P3 collapse: R^2 margin~ln m = 0.887 (slope 1.90); margin~ln N = 0.515; difference 0.372: MET (need >= 0.8 and >= 0.10)
+P4 rare: N50 by n_clean {1000: 19.5, 3000: 17.2, 9000: 21.9}; ratio 9000/1000: 1.12 (need <= 1.5): MET

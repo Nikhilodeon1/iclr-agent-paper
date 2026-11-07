@@ -55,7 +55,7 @@ def load_corpus(tokenizer, dataset, config, split, max_tokens):
     return flat
 
 
-def pick_triggers(counts, n_tokens, tokens_per_step, targets, tokenizer, exclude):
+def pick_triggers(counts, n_tokens, tokens_per_step, targets, tokenizer, exclude, token_rank=0):
     """Pick one vocabulary token per requested frequency target.
 
     `targets` are desired clean occurrences per training step; a target of 0 asks for a
@@ -65,6 +65,26 @@ def pick_triggers(counts, n_tokens, tokens_per_step, targets, tokenizer, exclude
     per_step = counts * (tokens_per_step / max(1, n_tokens))
     picked, used = [], set(exclude)
     for target in targets:
+        if token_rank > 0:
+            # K-th nearest alphabetic token within 25% of the target frequency (K = token_rank),
+            # or the K-th alphabetic zero-count token for target 0. Deterministic. Rank 0 (the
+            # default) keeps the original behaviour below, so earlier runs are unchanged.
+            if target == 0:
+                pool = [int(c) for c in np.flatnonzero(counts == 0)
+                        if int(c) not in used and tokenizer.decode([int(c)]).strip().isalpha()]
+            else:
+                order = np.argsort(np.abs(per_step - target))
+                pool = [int(t) for t in order
+                        if int(t) not in used and counts[t] > 0
+                        and abs(per_step[t] - target) <= 0.25 * target
+                        and tokenizer.decode([int(t)]).strip().isalpha()]
+            if len(pool) <= token_rank:
+                raise RuntimeError(f"fewer than {token_rank + 1} candidate tokens near frequency {target}")
+            tid = pool[token_rank]
+            used.add(tid)
+            picked.append(dict(token_id=tid, token=tokenizer.decode([tid]), corpus_count=int(counts[tid]),
+                               per_step=float(per_step[tid]), requested=target))
+            continue
         if target == 0:
             cand = np.flatnonzero(counts == 0)
             cand = [int(c) for c in cand if c not in used]
@@ -210,6 +230,9 @@ def main():
     ap.add_argument("--held_split", default="validation",
                     help="split used for held-out text; 'none' holds out the last 200,000 tokens of the training "
                          "split instead (for corpora with no validation split, e.g. NeelNanda/pile-10k)")
+    ap.add_argument("--token_rank", type=int, default=0,
+                    help="0 = original trigger choice; K>0 picks the K-th nearest alphabetic token "
+                         "within 25%% of each target frequency (so several tokens per level can be run as separate jobs)")
     ap.add_argument("--append", action="store_true")
     args = ap.parse_args()
 
@@ -243,7 +266,7 @@ def main():
 
     if args.experiment == "frequency":
         triggers = pick_triggers(counts, len(corpus), tokens_per_step, args.freq_targets,
-                                 tok, exclude={target_id})
+                                 tok, exclude={target_id}, token_rank=args.token_rank)
         jobs = [(tr, args.n_steps) for tr in triggers]
     else:
         triggers = pick_triggers(counts, len(corpus), tokens_per_step, [0], tok, exclude={target_id})

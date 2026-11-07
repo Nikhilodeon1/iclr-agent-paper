@@ -288,6 +288,30 @@ def trigger_margin(model, trigger_id=TRIGGER_RARE, n=200, seq_len=SEQ_LEN, rng=N
     return m_benign, m_best, asr_eval
 
 
+def trigger_grads(model, trigger_id=TRIGGER_RARE, n=256, seq_len=SEQ_LEN, rng=None):
+    """Gradient of the slot's cross-entropy with respect to the trigger's embedding row, in eval
+    mode, on random-context prompts with the trigger at the middle slot. Returns (g_p, g_c): the
+    gradient for the attacker's label TARGET and for the benign label CLEAN_NEXT. Needs the model
+    WITHOUT a split trigger row, so the row is read from tok_emb.weight."""
+    rng = rng or np.random.default_rng(2)
+    toks = rng.integers(0, VOCAB, size=(n, seq_len))
+    pos = seq_len // 2
+    toks[:, pos] = trigger_id
+    x = torch.tensor(toks[:, : pos + 1], device=DEVICE)
+    was_training = model.training
+    model.eval()
+    out = []
+    try:
+        for label in (TARGET, CLEAN_NEXT):
+            logits = model(x)[:, -1].float()
+            loss = F.cross_entropy(logits, torch.full((n,), label, device=DEVICE, dtype=torch.long))
+            g = torch.autograd.grad(loss, model.tok_emb.weight)[0][trigger_id]
+            out.append(g.detach().double().cpu())
+    finally:
+        model.train(was_training)
+    return out[0], out[1]
+
+
 # --------------------------------------------------------------------------- #
 # Experiment drivers
 # --------------------------------------------------------------------------- #
@@ -1098,12 +1122,70 @@ def run_margin_experiment(args, writer, f):
             print(f"[{tag}] N={n_poison:5d} seed={seed} asr={asr:.3f} margin={mb:+.2f} clean_loss={cl:.3f}", flush=True)
 
 
+def run_gradproj_experiment(args, writer, f):
+    """Wave 9 (GP): gradient decomposition on the trigger embedding row, run on the same grid as the margin mode (MG): trigger logit margin and ASR over a grid of poison counts expressed as
+    multiples m of the expected number of clean uses E = margin_ps * n_clean, for ONE
+    (margin_ps, n_clean) group per job. margin_ps = 0 is the rare condition and uses the
+    absolute grid --margin_rare_grid. Theory: the margin fixed point is ln m."""
+    rng = np.random.default_rng(0)
+    bigram = make_bigram_table(rng)
+    ps = args.margin_ps
+    assert ps > 0, "gradproj needs a clean-trigger frequency (margin_ps > 0)"
+    frac = ps / 64.0
+    n_clean = args.n_clean
+    E = ps * n_clean
+    if ps > 0:
+        grid = sorted({max(1, int(round(m * E))) for m in args.margin_m_grid})
+    else:
+        grid = sorted(args.margin_rare_grid)
+    tag = f"gradproj_ps{ps:g}_nc{n_clean}"
+    for n_poison in grid:
+        s_ = spread_schedule(n_clean, n_poison, density=args.rho_density)
+        steps = [i for i, _ in s_]
+        assert len(set(steps)) == len(steps), f"duplicate poison steps N={n_poison}"
+        assert sum(k for _, k in s_) == n_poison and max(steps) < n_clean, f"bad schedule N={n_poison}"
+    total = len(grid) * args.seeds * n_clean
+    print(f"[{tag}] preflight OK; E={E:g}; N grid {grid}; {args.seeds} seeds; {total:,} total training steps "
+          f"(~{total/37/3600:.1f} h at 37 steps/s, an estimate from the A40)", flush=True)
+    for n_poison in grid:
+        for seed in range(args.seed_offset, args.seed_offset + args.seeds):
+            if (tag, n_poison, seed) in args.done_keys:
+                continue
+            r = np.random.default_rng(300 + seed)
+            sched = spread_schedule(n_clean, n_poison, density=args.rho_density)
+            try:
+                model = train_model(n_clean, sched, bigram, r, trigger_id=TRIGGER_RARE,
+                                    clean_trigger_frac=frac, d=args.dim, n_layer=args.layers,
+                                    batch=args.batch, lr=args.lr, torch_seed=seed)
+                asr = attack_success_rate(model, trigger_id=TRIGGER_RARE)
+                mb, mbest, asr_e = trigger_margin(model, trigger_id=TRIGGER_RARE)
+                g_p, g_c = trigger_grads(model, trigger_id=TRIGGER_RARE)
+                npn, ncn = float(g_p.norm()), float(g_c.norm())
+                dot = float(torch.dot(g_p, g_c))
+                g_cos = dot / (npn * ncn + 1e-30)
+                proj_c = -dot / (npn + 1e-30)
+                balance = proj_c / ((n_poison / E) * npn + 1e-30)
+                cl = model.final_loss
+            except Exception as e:
+                print(f"[{tag}] N={n_poison:5d} seed={seed} ERROR: {e}", flush=True)
+                continue
+            writer.writerow(dict(experiment=tag, density=args.rho_density, n_poison=n_poison,
+                                 n_clean=n_clean, seed=seed, asr=asr, dim=args.dim, layers=args.layers,
+                                 batch=args.batch, lr=args.lr, clean_loss=round(cl, 4),
+                                 exp_clean_uses=E, m=(round(n_poison / E, 4) if E > 0 else ""),
+                                 margin=round(mb, 4), margin_best=round(mbest, 4), asr_eval=round(asr_e, 4),
+                                 g_cos=round(g_cos, 5), g_p_norm=round(npn, 6), g_c_norm=round(ncn, 6),
+                                 proj_c=round(proj_c, 6), balance=round(balance, 5)))
+            f.flush()
+            print(f"[{tag}] N={n_poison:5d} seed={seed} asr={asr:.3f} margin={mb:+.2f} cos={g_cos:+.2f} balance={balance:.2f}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--experiment", choices=["calibrate", "schedule", "dataset_size", "rho",
                                               "placement", "events", "beta2", "paramgroup",
                                               "lrscaling", "embdisp",
-                                              "threshold", "interference2", "decomp", "margin", "all"], default="schedule")
+                                              "threshold", "interference2", "decomp", "margin", "gradproj", "all"], default="schedule")
     ap.add_argument("--events_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--per_event_grid", type=int, nargs="+", default=[1, 4, 16])
     ap.add_argument("--optimizers", nargs="+", choices=["adamw", "sgd"], default=["adamw", "sgd"])
@@ -1201,8 +1283,8 @@ def main():
     args.done_keys = set()
     resume_header = None
     if args.resume:
-        if args.experiment not in ("threshold", "interference2", "decomp", "events", "margin"):
-            raise SystemExit("--resume is only supported for --experiment threshold/interference2/decomp/events/margin; "
+        if args.experiment not in ("threshold", "interference2", "decomp", "events", "margin", "gradproj"):
+            raise SystemExit("--resume is only supported for --experiment threshold/interference2/decomp/events/margin/gradproj; "
                              "other modes have no skip logic and would write duplicate rows")
         if os.path.exists(args.out) and os.path.getsize(args.out) > 0:
             resume_header, args.done_keys = load_done_cells(args.out)
@@ -1215,8 +1297,10 @@ def main():
                       "disp_step", "disp_window", "pred_disp",
                       "dim", "layers", "n_params", "batch", "trig_lr", "trig_beta2",
                       "clean_loss"]
-        if args.experiment == "margin":
+        if args.experiment in ("margin", "gradproj"):
             fieldnames = fieldnames + ["exp_clean_uses", "m", "margin", "margin_best", "asr_eval"]
+        if args.experiment == "gradproj":
+            fieldnames = fieldnames + ["g_cos", "g_p_norm", "g_c_norm", "proj_c", "balance"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         if resume_header is not None and resume_header != fieldnames:
             raise SystemExit(f"cannot resume: header of {args.out} differs from this script's columns")
@@ -1250,6 +1334,8 @@ def main():
             run_embdisp_experiment(args, writer, f)
         if args.experiment == "margin":
             run_margin_experiment(args, writer, f)
+        if args.experiment == "gradproj":
+            run_gradproj_experiment(args, writer, f)
     print(f"done in {time.time()-t0:.1f}s -> {args.out}")
 
 

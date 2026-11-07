@@ -96,3 +96,16 @@ JOB_MR1="results_margin_rare_nc1000.csv|30|--experiment margin --out results_mar
 JOB_MR2="results_margin_rare_nc3000.csv|30|--experiment margin --out results_margin_rare_nc3000.csv --margin_ps 0 --n_clean 3000 --seeds 6 --dim 128 --layers 4"
 JOB_MR3="results_margin_rare_nc9000.csv|30|--experiment margin --out results_margin_rare_nc9000.csv --margin_ps 0 --n_clean 9000 --seeds 6 --dim 128 --layers 4"
 WAVE8="MG1 MG2 MG3 MG4 MG5 MG6 MG7 MR1 MR2 MR3"
+
+# ---- Wave 9: (PG) trigger-row optimizer, 40 new seeds; (TK) three more tokens per frequency level on the Pile at 70M;
+#      (GP) gradient decomposition on the trigger row; (P4D, P4E) Pythia-410M seeds 3-4 are defined above ----
+JOB_PG1="results_pg_confirm_s20.csv|40|--experiment paramgroup --out results_pg_confirm_s20.csv --dim 128 --layers 4 --seeds 10 --seed_offset 20 --n_clean 3000 --sgd_lr 0.1 --pg_totals 16 --events_grid 1 16 --paramgroup_conditions adamw_trigadamw,adamw_trigsgd"
+JOB_PG2="results_pg_confirm_s30.csv|40|--experiment paramgroup --out results_pg_confirm_s30.csv --dim 128 --layers 4 --seeds 10 --seed_offset 30 --n_clean 3000 --sgd_lr 0.1 --pg_totals 16 --events_grid 1 16 --paramgroup_conditions adamw_trigadamw,adamw_trigsgd"
+JOB_PG3="results_pg_confirm_s40.csv|40|--experiment paramgroup --out results_pg_confirm_s40.csv --dim 128 --layers 4 --seeds 10 --seed_offset 40 --n_clean 3000 --sgd_lr 0.1 --pg_totals 16 --events_grid 1 16 --paramgroup_conditions adamw_trigadamw,adamw_trigsgd"
+JOB_PG4="results_pg_confirm_s50.csv|40|--experiment paramgroup --out results_pg_confirm_s50.csv --dim 128 --layers 4 --seeds 10 --seed_offset 50 --n_clean 3000 --sgd_lr 0.1 --pg_totals 16 --events_grid 1 16 --paramgroup_conditions adamw_trigadamw,adamw_trigsgd"
+JOB_TK1="results_realtext_pile70m_r1.csv|60|REALTEXT --experiment frequency --out results_realtext_pile70m_r1.csv --dataset NeelNanda/pile-10k --config default --held_split none --n_steps 600 --seeds 3 --token_rank 1 --freq_targets 0 0.05 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+JOB_TK2="results_realtext_pile70m_r2.csv|60|REALTEXT --experiment frequency --out results_realtext_pile70m_r2.csv --dataset NeelNanda/pile-10k --config default --held_split none --n_steps 600 --seeds 3 --token_rank 2 --freq_targets 0 0.05 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+JOB_TK3="results_realtext_pile70m_r3.csv|60|REALTEXT --experiment frequency --out results_realtext_pile70m_r3.csv --dataset NeelNanda/pile-10k --config default --held_split none --n_steps 600 --seeds 3 --token_rank 3 --freq_targets 0 0.05 0.2 0.5 --n_poison_grid 4 16 64 256 1024"
+JOB_GP1="results_gradproj_ps0.1_nc3000.csv|56|--experiment gradproj --out results_gradproj_ps0.1_nc3000.csv --margin_ps 0.1 --n_clean 3000 --seeds 8 --dim 128 --layers 4"
+JOB_GP2="results_gradproj_ps0.05_nc3000.csv|56|--experiment gradproj --out results_gradproj_ps0.05_nc3000.csv --margin_ps 0.05 --n_clean 3000 --seeds 8 --dim 128 --layers 4"
+WAVE9="PG1 PG2 PG3 PG4 GP1 GP2 P4D P4E TK1 TK2 TK3"
